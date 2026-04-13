@@ -41,15 +41,36 @@ TIMEOUT_REPOUSO = 70 # se parada (NMTime > 0), damos este intervalo de tolerânc
 # Tabela de Tags em Memória
 # Estrutura: { "tagID": {"timestamp": 0.0, "status": "online"} }
 registo_de_tags = {}
-# ------------------------------------
-# MATRIZ DE ALOCAÇÃO DE CLIENTES (MULTI-TENANT)
-# Mapeia o ID da Tag Física para o Cliente que a comprou -> NO FUTURO BASE DE DADOS EXTERNA SQL
-MATRIZ_CLIENTES = {
-    "300AB1": "cliente_A",  # A tag 300AB1 pertence à Empresa A
-    "300AAF": "cliente_B",  # A tag 300AAF pertence à Empresa B
-    "300AAE": "cliente_A",  # O cliente A comprou outra tag (300AAE)
-    "300AB0": "cliente_C"   # A tag 300AB0 pertence à Empresa C
-}
+# Motor para Multi-Tenant
+def carregar_matriz_clientes(ficheiro="matriz_clientes.csv"):
+    matriz = {}
+    
+    # se o ficheiro não existir, avisa em vez de crashar
+    if not os.path.exists(ficheiro):
+        print(f"[AVISO] Ficheiro {ficheiro} não encontrado. A operar sem identificação de clientes.")
+        return matriz
+    
+    try:
+        with open(ficheiro, mode='r', encoding='utf-8') as file:
+            # Usa a primeira linha como nomes das colunas
+            reader = csv.DictReader(file, delimiter=';')
+            for linha in reader:
+                # O .strip() limpa espaços em branco acidentais
+                tag = linha.get('tag_id', '').strip()
+                tenant = linha.get('tenant_id', '').strip()
+                
+                # Só adiciona se a linha estiver bem preenchida
+                if tag and tenant:
+                    matriz[tag] = tenant
+                    
+        print(f"Matriz Dinâmica Carregada: {len(matriz)} tags mapeadas a partir do CSV.")
+    except Exception as e:
+        print(f"❌ Erro ao ler a Matriz de Clientes: {e}")
+        
+    return matriz
+
+# Carrega a tabela para a memória quando o script arranca
+MATRIZ_CLIENTES = carregar_matriz_clientes()
 # ------------------------------------
 
 def registar_evento(tag_id, evento, detalhes):
