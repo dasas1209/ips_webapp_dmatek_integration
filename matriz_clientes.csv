@@ -1,0 +1,5 @@
+tag_id;tenant_id;descricao
+300AB1;cliente_A;Empilhador Armazém 1
+300AAF;cliente_B;AGV Linha Montagem
+300AAE;cliente_A;Operador Qualidade
+300AB0;cliente_C;Operador Fresadora
