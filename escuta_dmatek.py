@@ -9,7 +9,7 @@ from datetime import datetime
 
 # ----------------------------
 # para registo de dados em InfluxDB (py vai buscar valores ao .env e guarda-os na memória)
-from influxdb_client import InfluxDBClient, Point, WritePrecision
+from influxdb_client import InfluxDBClient, Point, WritePrecision # type: ignore
 from influxdb_client.client.write_api import SYNCHRONOUS
 import os
 from dotenv import load_dotenv
@@ -22,7 +22,7 @@ INFLUX_ORG = os.getenv("INFLUX_ORG")
 INFLUX_BUCKET = os.getenv("INFLUX_BUCKET")
 
 # Inicializar o motor da Base de Dados
-client = InfluxDBClient(url=INFLUX_URL, token=INFLUX_TOKEN, org=INFLUX_ORG)
+client = InfluxDBClient(url=INFLUX_URL, token=INFLUX_TOKEN, org=INFLUX_ORG) # type: ignore
 write_api = client.write_api(write_options=SYNCHRONOUS)
 
 # ------------------------------------
@@ -121,11 +121,20 @@ async def escutar_fabrica():
                         px = tag.get("PX", -1)
                         py = tag.get("PY", -1)
                         nm_time = tag.get("NMTime", 0) # Tempo parada
+                        m_type = tag.get("MType", "Normal")
 
                         # 1. POKA-YOKE
                         if not (0 <= px <= LIMITE_X_CM and 0 <= py <= LIMITE_Y_CM):
                             print(f"❌ [Tag {tag_id}] Fora do Mapa. Ignorada.")
                             continue
+                        
+                        status_alarme = "normal"
+                        if m_type == "Urgency":
+                            status_alarme = "panic"
+                            print(f"🚨 [EMERGÊNCIA] Botão de Pânico na Tag {tag_id}!")
+                            
+                            # Ação 1: Registo Documental (Auditoria)
+                            registar_evento(tag_id, "EMERGENCY_BUTTON", f"Botão de pânico premido na coordenada X:{px} Y:{py}")
 
                         # 2. ATUALIZAR INVENTÁRIO (Lógica de Estado)
                         estava_offline = registo_de_tags.get(tag_id, {}).get("status") == "offline"
@@ -153,10 +162,11 @@ async def escutar_fabrica():
                             .tag("tenant_id", id_do_cliente) \
                             .field("coord_x", px) \
                             .field("coord_y", py) \
-                            .field("nm_time", nm_time)
+                            .field("nm_time", nm_time) \
+                            .field("m_type", m_type)
                         
                         # Escreve no influxdb
-                        write_api.write(bucket=INFLUX_BUCKET, org=INFLUX_ORG, record=ponto_bd)
+                        write_api.write(bucket=INFLUX_BUCKET, org=INFLUX_ORG, record=ponto_bd) # type: ignore
                         print(f"📍 [Tag {tag_id} -> {id_do_cliente}] {modo} | X:{px} Y:{py} | NMTime:{nm_time}s")
 
                 except Exception as e:
