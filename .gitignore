@@ -1,3 +1,4 @@
 .env
 __pycache__/
 auditoria_tags.csv
+matriz_clientes.csv
