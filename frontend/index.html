@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Metric4 - Monitorização Industrial</title>
+    <style>
+        /* CSS basico, Funcionalidade > Estética nesta fase */
+        body { font-family: Arial, sans-serif; background-color: #f4f4f9; padding: 20px; }
+        .caixa { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); max-width: 400px; margin: auto; }
+        .escondido { display: none; }
+        input, button { width: 100%; padding: 10px; margin: 8px 0; box-sizing: border-box; }
+        button { background-color: #0056b3; color: white; border: none; cursor: pointer; }
+        button:hover { background-color: #004494; }
+        #consola_dados { background: #1e1e1e; color: #00ff00; padding: 15px; font-family: monospace; white-space: pre-wrap; height: 300px; overflow-y: scroll; }
+    </style>
+</head>
+<body>
+
+    <div id="seccao_login" class="caixa">
+        <h2>Acesso à Fábrica</h2>
+        <input type="text" id="username" placeholder="Identificação (ex: gestor_a)">
+        <input type="password" id="password" placeholder="Palavra-passe">
+        <button onclick="fazerLogin()">Entrar</button>
+        <p id="mensagem_erro" style="color: red;"></p>
+    </div>
+
+    <div id="seccao_dashboard" class="escondido">
+        <h2>Painel de Controlo - <span id="nome_cliente"></span></h2>
+        <button onclick="fazerLogout()" style="background-color: #dc3545; width: auto;">Sair (Devolver Crachá)</button>
+        <button onclick="obterPosicoes()" style="background-color: #28a745; width: auto;">Atualizar Dados</button>
+        
+        <h3>Prova de Conceito (Dados Brutos):</h3>
+        <div id="consola_dados">A aguardar dados da fábrica...</div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

@@ -6,6 +6,8 @@ from jose import jwt
 from datetime import datetime, timedelta
 import os
 from dotenv import load_dotenv
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 
 load_dotenv()
 SECRET_KEY = os.getenv("SECRET_KEY") 
@@ -21,6 +23,9 @@ app = FastAPI(
     description="API de Gestão Multi-Tenant para posições em tempo real.",
     version="1.0.0"
 )
+
+# permite que o HTML encontre o app.js
+app.mount("/static", StaticFiles(directory="frontend"), name="static")
 
 # --- MVP: SIMULADOR DE UTILIZADORES E CLIENTES ---
 # Na Fase 4, isto virá de uma base de dados real (ex: PostgreSQL)
@@ -148,3 +153,8 @@ def obter_posicoes_do_mapa(cliente_id: str = Depends(verificar_cracha)):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erro interno no Armazém de Dados: {str(e)}")
+    
+@app.get("/app", tags=["Interface Gráfica"])
+def servir_webapp():
+# Quando alguém vai a /app, o servidor entrega-lhe o ficheiro HTML
+    return FileResponse("frontend/index.html")
