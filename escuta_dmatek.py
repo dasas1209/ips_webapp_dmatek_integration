@@ -31,7 +31,7 @@ write_api = client.write_api(write_options=SYNCHRONOUS)
 IP_SERVIDOR = "172.16.0.201"
 PORTA = "5002"
 ENDPOINT = "/TagPosition" 
-# Dimensões reais do mapa no cliente (em centímetros) - não corrige erros para áreas em L ou com formas não retangulares 
+# Dimensões reais do mapa no cliente (em centímetros) - não corrige erros para áreas em L ou com formas não retangulares (escalar no futuro para vários mapas por cliente)
 LIMITE_X_CM = 760
 LIMITE_Y_CM = 500
 # Lógica de Inteligent Power Strategy (Tempos em Segundos)

@@ -19,7 +19,7 @@ SECRET_KEY = os.getenv("SECRET_KEY", "chave-provisoria-para-teste")
 
 # 2. Inicializar o API
 app = FastAPI(
-    title="Portal de Dados RTLS Dmatek",
+    title="Portal de Dados RTLS",
     description="API de Gestão Multi-Tenant para posições em tempo real.",
     version="1.0.0"
 )
