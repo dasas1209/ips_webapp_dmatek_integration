@@ -121,7 +121,8 @@ async def escutar_fabrica():
                         px = tag.get("PX", -1)
                         py = tag.get("PY", -1)
                         nm_time = tag.get("NMTime", 0) # Tempo parada
-                        m_type = tag.get("MType", "Normal")
+                        estado_tag = tag.get("MType", "Normal")
+                        nivel_bateria = int(tag.get("Batt", 0))
 
                         # 1. POKA-YOKE
                         if not (0 <= px <= LIMITE_X_CM and 0 <= py <= LIMITE_Y_CM):
@@ -129,7 +130,7 @@ async def escutar_fabrica():
                             continue
                         
                         status_alarme = "normal"
-                        if m_type == "Urgency":
+                        if estado_tag == "Urgency":
                             status_alarme = "panic"
                             print(f"🚨 [EMERGÊNCIA] Botão de Pânico na Tag {tag_id}!")
                             
@@ -163,7 +164,8 @@ async def escutar_fabrica():
                             .field("coord_x", px) \
                             .field("coord_y", py) \
                             .field("nm_time", nm_time) \
-                            .field("m_type", m_type)
+                            .field("status", estado_tag)\
+                            .field("bateria", nivel_bateria)
                         
                         # Escreve no influxdb
                         write_api.write(bucket=INFLUX_BUCKET, org=INFLUX_ORG, record=ponto_bd) # type: ignore

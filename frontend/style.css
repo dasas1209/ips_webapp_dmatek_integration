@@ -1,0 +1,72 @@
+/* 1. LAYOUT GERAL DO DASHBOARD (A "Nave" da Fábrica) */
+.dashboard-container {
+    display: flex;             /* Ativa o motor elástico Flexbox */
+    flex-direction: row;       /* Coloca os elementos filhos em LINHA (lado a lado) */
+    gap: 20px;                 /* Cria um corredor de 20px entre o mapa e a sidebar */
+    margin-top: 20px;
+    align-items: flex-start;   /* Alinha ambos os blocos pelo topo do ecrã */
+}
+
+/* 2. ZONA DO MAPA (70%) */
+.mapa-container {
+    flex: 7; /* Dos 10 pedaços de ecrã (7+3), este ocupa 7 (70%) */
+}
+
+/* 3. ZONA DA SIDEBAR (30%) */
+.sidebar {
+    flex: 3; /* Ocupa 3 (30%) */
+    display: flex;
+    flex-direction: column;    /* Coloca os painéis da sidebar em COLUNA (um em cima do outro) */
+    gap: 15px;                 /* Espaço entre o painel de Alarmes e o de Baterias */
+}
+
+/* 4. ESTÉTICA DOS PAINÉIS (As "Caixas de Ferramentas") */
+.painel-critico, .painel-manutencao {
+    background-color: #f8f9fa; /* Cinza muito claro, padrão industrial */
+    border: 1px solid #dee2e6;
+    border-radius: 5px;        /* Cantos ligeiramente arredondados */
+    padding: 15px;             /* Espaço interno para o texto não colar às bordas */
+    box-shadow: 0 2px 4px rgba(0,0,0,0.05); /* Sombra subtil para destacar do fundo */
+}
+
+/* Cabeçalhos dos Painéis */
+.painel-critico h3 {
+    color: #dc3545; /* Vermelho para Urgência Crítica */
+    margin-top: 0;
+    border-bottom: 2px solid #dc3545;
+    padding-bottom: 5px;
+}
+
+.painel-manutencao h3 {
+    color: #fd7e14; /* Laranja para Manutenção Preventiva */
+    margin-top: 0;
+    border-bottom: 2px solid #fd7e14;
+    padding-bottom: 5px;
+}
+
+/* Listas de Tags (Limpar o estilo padrão das listas HTML) */
+.sidebar ul {
+    list-style-type: none; /* Remove as "bolinhas" padrão das listas do Word */
+    padding: 0;
+    margin: 0;
+}
+
+.sidebar li {
+    padding: 8px 0;
+    border-bottom: 1px solid #eee; /* Linha separadora entre cada tag listada */
+}
+
+/* Estilo para quando está tudo bem (vazio) */
+.sidebar li.placeholder {
+    color: #6c757d;
+    font-style: italic;
+    border: none;
+}
+
+/* CSS basico, Funcionalidade > Estética nesta fase */
+body { font-family: Arial, sans-serif; background-color: #f4f4f9; padding: 20px; }
+.caixa { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); max-width: 400px; margin: auto; }
+.escondido { display: none; }
+input, button { width: 100%; padding: 10px; margin: 8px 0; box-sizing: border-box; }
+button { background-color: #0056b3; color: white; border: none; cursor: pointer; }
+button:hover { background-color: #004494; }

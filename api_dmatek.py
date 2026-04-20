@@ -141,8 +141,9 @@ def obter_posicoes_do_mapa(cliente_id: str = Depends(verificar_cracha)):
                     "tag_id": linha.values.get("tag_id"),
                     "x": linha.values.get("coord_x"),
                     "y": linha.values.get("coord_y"),
-                    "timestamp": linha.values.get("_time")
-                })
+                    "timestamp": linha.values.get("_time"), 
+                    "bateria": linha.values.get("bateria", 0),         
+                    "status": linha.values.get("status", "Urgency") })  
                 
         client.close()
         
