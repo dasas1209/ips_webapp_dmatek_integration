@@ -30,8 +30,9 @@ app.mount("/static", StaticFiles(directory="frontend"), name="static")
 # --- MVP: SIMULADOR DE UTILIZADORES E CLIENTES ---
 # Na Fase 4, isto virá de uma base de dados real (ex: PostgreSQL)
 UTILIZADORES = {
-    "gestor_a": {"password": "123", "tenant_id": "cliente_A"},
-    "gestor_b": {"password": "456", "tenant_id": "cliente_B"}
+    "gestor_a": {"password": "123", "tenant_id": "cliente_A"}, 
+    "gestor_b": {"password": "456", "tenant_id": "cliente_B"},
+    "gestor_c": {"password": "789", "tenant_id": "cliente_C"}
 }
 
 # --- CONFIGURAÇÃO INFLUXDB ---
@@ -123,23 +124,23 @@ def obter_posicoes_do_mapa(cliente_id: str = Depends(verificar_cracha)):
         # Pede os dados dos últimos 5 minutos, mas SÓ daquele tenant_id!
         query = f"""
             from(bucket: "{INFLUX_BUCKET}")
-            |> range(start: -5m)
-            |> filter(fn: (r) => r["_measurement"] == "utag_position")
+            |> range(start: -1h)
+            |> filter(fn: (r) => r["_measurement"] == "posicao_tag")
             |> filter(fn: (r) => r["tenant_id"] == "{cliente_id}") 
             |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
         """
         
         # 3. Executar o pedido
         tabelas = query_api.query(query)
-        
+       
         # 4. Transformar os dados complexos do Influx num formato simples para a WebApp
         posicoes = []
         for tabela in tabelas:
             for linha in tabela.records:
                 posicoes.append({
-                    "tag_id": linha.values.get("tag"),
-                    "x": linha.values.get("x"),
-                    "y": linha.values.get("y"),
+                    "tag_id": linha.values.get("tag_id"),
+                    "x": linha.values.get("coord_x"),
+                    "y": linha.values.get("coord_y"),
                     "timestamp": linha.values.get("_time")
                 })
                 
