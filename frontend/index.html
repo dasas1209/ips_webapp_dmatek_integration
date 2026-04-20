@@ -30,8 +30,10 @@
         <button onclick="fazerLogout()" style="background-color: #dc3545; width: auto;">Sair (Devolver Crachá)</button>
         <button onclick="obterPosicoes()" style="background-color: #28a745; width: auto;">Atualizar Dados</button>
         
-        <h3>Prova de Conceito (Dados Brutos):</h3>
-        <div id="consola_dados">A aguardar dados da fábrica...</div>
+        <h3>Planta da Fábrica (Monitorização Ativa):</h3>
+        <div style="position: relative; display: inline-block; border: 2px solid #ccc; background: white;">
+            <canvas id="mapaFabrica" width="800" height="600"></canvas>
+        </div>
     </div>
 
     <script src="/static/app.js"></script>

@@ -120,13 +120,13 @@ def obter_posicoes_do_mapa(cliente_id: str = Depends(verificar_cracha)):
         client = InfluxDBClient(url=INFLUX_URL, token=INFLUX_TOKEN, org=INFLUX_ORG) # type: ignore
         query_api = client.query_api()
 
-        # 2. Construir o Pedido (Query Flux) com Filtro Rigoroso Multi-Tenant
-        # Pede os dados dos últimos 5 minutos, mas SÓ daquele tenant_id!
+        # 2. Construir o Pedido (Query Flux) com Filtro Multi-Tenant
         query = f"""
             from(bucket: "{INFLUX_BUCKET}")
             |> range(start: -1h)
             |> filter(fn: (r) => r["_measurement"] == "posicao_tag")
             |> filter(fn: (r) => r["tenant_id"] == "{cliente_id}") 
+            |> last()
             |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
         """
         
