@@ -3,7 +3,7 @@
     display: flex;             /* Ativa o motor elástico Flexbox */
     flex-direction: row;       /* Coloca os elementos filhos em LINHA (lado a lado) */
     gap: 20px;                 /* Cria um corredor de 20px entre o mapa e a sidebar */
-    margin-top: 20px;
+    margin-top: 20px;          /* Espaço normal - barra KPI é sticky, não fixed */
     align-items: flex-start;   /* Alinha ambos os blocos pelo topo do ecrã */
 }
 
@@ -72,8 +72,115 @@
 
 /* CSS basico, Funcionalidade > Estética nesta fase */
 body { font-family: Arial, sans-serif; background-color: #f4f4f9; padding: 20px; }
-.caixa { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); max-width: 400px; margin: auto; }
-.escondido { display: none; }
+.caixa { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); max-width: 400px; margin: 80px auto 20px auto; }
+.escondido { display: none !important; }
 input, button { width: 100%; padding: 10px; margin: 8px 0; box-sizing: border-box; }
 button { background-color: #0056b3; color: white; border: none; cursor: pointer; }
 button:hover { background-color: #004494; }
+
+.painel-diretor {
+    display: flex;
+    justify-content: flex-start;
+    gap: 30px;
+    margin-bottom: 15px;
+    padding: 10px;
+    background-color: white;
+    border: none;
+    position: sticky;   /* Fica no topo mas desaparece ao fazer scroll */
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 1000;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    flex-wrap: nowrap;
+}
+
+.kpi-card {
+    background-color: #ffffff;
+    padding: 10px 20px; /* Mais achatado (menos altura, mais largura) */
+    border-radius: 6px;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    display: flex;
+    justify-content: space-between; /* Título à esquerda, número à direita */
+    align-items: center;
+    border-left: 4px solid #0d6efd;
+    min-width: 200px; /* Make larger */
+}
+
+.kpi-card h3 {
+    margin: 0;
+    font-size: 12px;
+    color: #6c757d;
+    text-transform: uppercase;
+}
+
+.kpi-card p {
+    margin: 0;
+    font-size: 22px; /* Ligeiramente mais pequeno, mas forte */
+    font-weight: bold;
+    color: #212529;
+}
+
+
+.grafico-card {
+    flex: 2;
+    min-width: 400px;
+    background-color: #ffffff;
+    padding: 15px;
+    border-radius: 6px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+}
+
+/* Button styles */
+.btn-relatorio, .btn-voltar {
+    background-color: #28a745;
+    color: white;
+    border: none;
+    padding: 6px 16px;          /* Compacto */
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 13px;
+    width: auto !important;     /* Sobrepõe a regra global button { width: 100% } */
+    display: inline-block;
+    margin-left: auto;          /* Empurra para a direita dentro do flex painel */
+    align-self: center;
+}
+
+.btn-relatorio:hover, .btn-voltar:hover {
+    background-color: #218838;
+}
+
+/* Relatorio page styles */
+.relatorio-container {
+    padding: 20px;
+    max-width: 1200px;
+    margin: auto;
+}
+
+/* --- RELATÓRIO: GRÁFICOS DE KPI --- */
+.grafico-container {
+    background-color: #ffffff;
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    margin-top: 20px;
+}
+
+.grafico-container h2 {
+    margin-top: 0;
+    margin-bottom: 16px;
+    color: #333;
+    font-size: 16px;
+}
+
+/* Scrollbar sempre visível: dá pista visual de que há scroll horizontal */
+.chart-wrapper {
+    overflow-x: scroll;
+    overflow-y: hidden;
+}
+
+/* Altura fixa — largura definida dinamicamente via JS (max(numTags × 120px, 500px)) */
+.chart-wrapper canvas {
+    height: 350px !important;
+    display: block; /* Elimina o gap inline-block abaixo do canvas */
+}

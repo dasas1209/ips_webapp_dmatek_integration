@@ -1,11 +1,14 @@
 <!DOCTYPE html>
 <html lang="pt">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Metric4 - Monitorização Industrial</title>
-    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="/static/style.css?v=1.2">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
+
 <body>
 
     <div id="seccao_login" class="caixa">
@@ -16,13 +19,30 @@
         <p id="mensagem_erro" style="color: red;"></p>
     </div>
 
+    <div id="painel_diretor" class="painel-diretor escondido" style="display:none;">
+        <div class="kpi-card">
+            <h3>Distância Total (Frota)</h3>
+            <p id="kpi-distancia">0 m</p>
+        </div>
+        <div class="kpi-card">
+            <h3>OEE Frota (Utilização)</h3>
+            <p id="kpi-utilizacao">0 %</p>
+        </div>
+        <div class="kpi-card">
+            <h3>Saúde Baterias (Média)</h3>
+            <p id="kpi-bateria">0 %</p>
+        </div>
+
+        <button class="btn-relatorio" onclick="window.location.href='relatorio.html'">Ver Distância por Tag</button>
+    </div>
+
     <div id="seccao_dashboard" class="escondido">
         <h2>Painel de Controlo - <span id="nome_cliente"></span></h2>
         <button onclick="fazerLogout()" style="background-color: #dc3545; width: auto;">Sair (Devolver Crachá)</button>
         <button onclick="obterPosicoes()" style="background-color: #28a745; width: auto;">Atualizar Dados</button>
-        
+
         <div class="dashboard-container">
-            
+
             <div class="mapa-container">
                 <h3>Planta da Fábrica (Monitorização Ativa):</h3>
                 <div style="position: relative; display: inline-block; border: 2px solid #ccc; background: white;">
@@ -31,7 +51,7 @@
             </div>
 
             <div class="sidebar">
-                
+
                 <div class="painel-critico">
                     <h3>🚨 Alertas Críticos</h3>
                     <ul id="lista_alertas">
@@ -53,4 +73,5 @@
 
     <script src="/static/app.js"></script>
 </body>
+
 </html>
