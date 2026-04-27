@@ -89,7 +89,11 @@ async function obterPosicoes() {
         if (resposta.ok) {
             const pacoteDados = await resposta.json();
             document.getElementById("nome_cliente").innerText = pacoteDados.cliente;
-            
+
+            //Alimenta o painel de baterias e de alertas a cada ciclo
+            atualizarPainelBaterias(pacoteDados.dados);
+            atualizarPainelAlertas(pacoteDados.dados);
+
             // Define o caminho que queremos
             const caminhoCorreto = `/static/assets/mapa_${pacoteDados.cliente}.png`;
 
@@ -147,18 +151,103 @@ function desenharFabrica(pacoteDados) {
             ctx.fill();
         }
         
-        // Desenhar o ponto principal (A Tag)
+        // --- SISTEMA ANDON ---
+        let raioTag = 8;
+        let corPreenchimento = "#007bff"; // Azul industrial (Normal)
+        let corBorda = "#ffffff";
+
+        // Se o estado não for "Normal", entramos em modo de EMERGÊNCIA
+        if (tag.status !== null && tag.status !== "Normal") {
+            raioTag = 12; // Aumentamos o tamanho da Tag para destacar no mapa
+            corBorda = "#dc3545"; // Borda a vermelho forte
+            
+            // Lógica do Piscar (Strobe): Se a 1ª metade do segundo, vermelho. Se a 2ª metade, branco.
+            const piscar = new Date().getMilliseconds() < 500;
+            corPreenchimento = piscar ? "#dc3545" : "#ffffff"; 
+        }
+        
+        // Desenhar a Tag efetivamente com as regras aplicadas
         ctx.beginPath();
-        ctx.arc(pixelX, pixelY, 8, 0, 2 * Math.PI); // Ponto de 8 pixels de raio
-        ctx.fillStyle = "#007bff"; // Azul industrial
+        ctx.arc(pixelX, pixelY, raioTag, 0, 2 * Math.PI);
+        ctx.fillStyle = corPreenchimento;
         ctx.fill();
         ctx.lineWidth = 2;
-        ctx.strokeStyle = "#ffffff";
+        ctx.strokeStyle = corBorda;
         ctx.stroke();
 
         // Etiqueta com o nome da Tag
         ctx.fillStyle = "#000000";
         ctx.font = "12px Arial";
         ctx.fillText(tag.tag_id, pixelX + 12, pixelY + 4);
+    });
+}
+
+// 6. Painel de Baterias (Manutenção Preventiva)
+function atualizarPainelBaterias(dadosTags) {
+    const listaBaterias = document.getElementById("lista_baterias");
+
+    // 1. FILTRAGEM: ignorar nulls e ordenar por bateria (crescente - mais críticas primeiro)
+    let todasAsTags = dadosTags.filter(tag => tag.bateria !== null);
+
+    // 2. ORDENAÇÃO Crescente (mais críticas primeiro)
+    todasAsTags.sort((a, b) => a.bateria - b.bateria);
+
+    // 3. LIMPEZA do painel antes de escrever os novos dados
+    listaBaterias.innerHTML = "";
+
+    // 4. POKA-YOKE: Se não há tags, mostramos que está tudo bem
+    if (todasAsTags.length === 0) {
+        listaBaterias.innerHTML = '<li class="placeholder">Nenhuma tag online.</li>';
+        return; // Pára a função aqui
+    }
+
+    // 5. Para cada tag, criar uma linha no painel com cor dinâmica
+    todasAsTags.forEach(tag => {
+        const itemLista = document.createElement("li");
+        
+        // Regra de cores por nível de bateria:
+        // ≤ 5% → Vermelho (crítico)
+        // 6-20% → Laranja (alerta)
+        // > 20% → Verde (operacional)
+        let corBateria;
+        if (tag.bateria <= 5) {
+            corBateria = "red"; // Crítico
+        } else if (tag.bateria <= 20) {
+            corBateria = "#fd7e14"; // Alerta (laranja)
+        } else {
+            corBateria = "#28a745"; // Normal (verde)
+        }
+        
+        // Aplicar bold apenas em alertas e críticos
+        let fontWeight = tag.bateria <= 20 ? "bold" : "normal";
+        
+        itemLista.innerHTML = `Tag <strong>${tag.tag_id}</strong>: <span style="color: ${corBateria}; font-weight: ${fontWeight};">${tag.bateria}%</span>`;
+        listaBaterias.appendChild(itemLista);
+    });
+}
+
+// 7. Painel de Alertas Críticos (Sistema Andon)
+function atualizarPainelAlertas(dadosTags) {
+    const listaAlertas = document.getElementById("lista_alertas");
+    
+    // 1. FILTRAGEM: apenas status seja diferente de "Normal", ignorar os nulls
+    let tagsEmPanico = dadosTags.filter(tag => tag.status !== null && tag.status !== "Normal");
+
+    // 2. LIMPEZA do painel
+    listaAlertas.innerHTML = "";
+
+    // 3. ESTADO NORMAL: lista vazia -> placeholder de segurança
+    if (tagsEmPanico.length === 0) {
+        listaAlertas.innerHTML = '<li class="placeholder">Nenhum alerta ativo. Sistema normal.</li>';
+        return;
+    }
+
+    // 4. INJEÇÃO VISUAL:alerta vermelho e vibrante
+    tagsEmPanico.forEach(tag => {
+        const itemLista = document.createElement("li");
+        
+        // Formatação Vermelho, Negrito para chamar a atenção do operador
+        itemLista.innerHTML = `🚨 <strong>EMERGÊNCIA:</strong> Tag <span style="color: #dc3545; font-weight: bold;">${tag.tag_id}</span> acionou o alarme!`;
+        listaAlertas.appendChild(itemLista);
     });
 }

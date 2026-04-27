@@ -123,7 +123,7 @@ async def escutar_fabrica():
                         nm_time = tag.get("NMTime", 0) # Tempo parada
                         estado_tag = tag.get("MType", "Normal")
                         nivel_bateria = int(tag.get("Batt", 0))
-
+                    
                         # 1. POKA-YOKE
                         if not (0 <= px <= LIMITE_X_CM and 0 <= py <= LIMITE_Y_CM):
                             print(f"❌ [Tag {tag_id}] Fora do Mapa. Ignorada.")
