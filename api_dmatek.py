@@ -4,7 +4,7 @@ api rest do sistema metric4 rtls
 """
 import math
 import re
-import csv
+import sqlite3
 import logging
 import time
 from collections import Counter
@@ -36,7 +36,7 @@ from config import (
     SECRET_KEY,
     TOKEN_EXPIRY_HOURS,
 )
-from shared import carregar_matriz_clientes
+from shared import get_db_connection
 
 # configuracao da aplicacao fastapi
 
@@ -78,41 +78,35 @@ async def serve_auditoria():
     return FileResponse("frontend/auditoria.html")
 
 
-# base de dados de utilizadores placeholder
+# carregamento de utilizadores da base de dados
 
-def carregar_utilizadores_placeholder(caminho: Path | str | None = None) -> dict[str, dict]:
-    """carrega utilizadores de um csv placeholder externo"""
-    if caminho is None:
-        caminho = Path(__file__).parent / "utilizadores_placeholder.csv"
-
-    caminho = Path(caminho)
+def carregar_utilizadores_db() -> dict[str, dict]:
+    """carrega utilizadores da bd sqlite — substitui o csv placeholder"""
     utilizadores: dict[str, dict] = {}
-
-    if not caminho.exists():
+    try:
+        with get_db_connection() as conn:
+            rows = conn.execute(
+                "SELECT username, password, cliente_id FROM users"
+            ).fetchall()
+        for row in rows:
+            utilizadores[row["username"]] = {
+                "password":  row["password"],
+                "tenant_id": row["cliente_id"],
+            }
+        if not utilizadores:
+            raise RuntimeError(
+                "Tabela users vazia. Corre database_setup.py antes de iniciar a API."
+            )
+        logger.info("Utilizadores carregados da BD: %s", len(utilizadores))
+    except sqlite3.Error as exc:
         raise RuntimeError(
-            f"CSV de utilizadores placeholder não encontrado: {caminho.name}."
-        )
-
-    with open(caminho, encoding="utf-8") as fh:
-        reader = csv.DictReader(fh, delimiter=";")
-        for linha in reader:
-            username = linha.get("username", "").strip()
-            password = linha.get("password", "").strip()
-            tenant_id = linha.get("tenant_id", "").strip()
-            if username and password and tenant_id:
-                utilizadores[username] = {"password": password, "tenant_id": tenant_id}
-
-    if not utilizadores:
-        raise RuntimeError(
-            "CSV de utilizadores placeholder vazio ou inválido. "
-            "Esperadas colunas: username;password;tenant_id."
-        )
-
-    logger.info("Utilizadores placeholder carregados: %s", len(utilizadores))
+            f"Falha ao ler utilizadores da BD: {exc}. "
+            "Garante que database_setup.py foi executado."
+        ) from exc
     return utilizadores
 
 
-UTILIZADORES: dict[str, dict] = carregar_utilizadores_placeholder()
+UTILIZADORES: dict[str, dict] = carregar_utilizadores_db()
 
 
 class TenantRateLimiter:
@@ -358,6 +352,17 @@ async def _obter_kpis_turno_por_tenant(tenant_id: str):
         }
         grafico_bateria = {t: round(d["bateria"], 1) for t, d in tags_processadas.items()}
 
+        # total de tags registadas na bd (independente da actividade influx)
+        try:
+            with get_db_connection() as conn:
+                row = conn.execute(
+                    "SELECT COUNT(*) AS n FROM tags WHERE cliente_id = ?",
+                    (tenant_id,),
+                ).fetchone()
+            total_assets_bd = row["n"] if row else 0
+        except Exception:
+            total_assets_bd = len(tags_processadas)
+
         return {
             "sucesso":    True,
             "tenant_id":  tenant_id,
@@ -366,6 +371,7 @@ async def _obter_kpis_turno_por_tenant(tenant_id: str):
                 "taxa_utilizacao_perc":        taxa_utilizacao,
                 "bateria_media_frota_perc":    bateria_media,
                 "tags_ativas_turno":           len(tags_processadas),
+                "total_assets":                total_assets_bd,
             },
             "grafico_distancias": grafico_distancias,
             "grafico_utilizacao": grafico_utilizacao,
@@ -400,10 +406,40 @@ async def obter_kpis_turno_legado(
 
 # rotas de auditoria
 
+def _obter_tags_do_cliente(cliente_id: str) -> set[str]:
+    """devolve o conjunto de id_fisico das tags associadas ao cliente via bd"""
+    try:
+        with get_db_connection() as conn:
+            rows = conn.execute(
+                "SELECT id_fisico FROM tags WHERE cliente_id = ?",
+                (cliente_id,),
+            ).fetchall()
+        return {row["id_fisico"] for row in rows}
+    except sqlite3.Error as exc:
+        logger.error("falha ao obter tags do cliente %s: %s", cliente_id, exc)
+        return set()
+
+
+def _obter_limites_mapa_cliente(cliente_id: str) -> tuple[float, float]:
+    """devolve (limite_x, limite_y) do mapa do cliente a partir da bd"""
+    try:
+        with get_db_connection() as conn:
+            row = conn.execute(
+                "SELECT limite_x, limite_y FROM mapas WHERE cliente_id = ? LIMIT 1",
+                (cliente_id,),
+            ).fetchone()
+        if row:
+            return float(row["limite_x"]), float(row["limite_y"])
+    except sqlite3.Error as exc:
+        logger.warning("nao foi possivel obter limites do mapa para %s: %s", cliente_id, exc)
+    # fallback defensivo para clientes sem mapa registado
+    return LIMITE_X_CM, LIMITE_Y_CM
+
+
 def _carregar_eventos_csv(inicio_dt: datetime, fim_dt: datetime, cliente_id: str) -> list[dict]:
-    """le csv e devolve eventos do cliente no intervalo temporal"""
-    mapa_tags  = carregar_matriz_clientes()
-    tags_do_cliente = {tid for tid, cid in mapa_tags.items() if cid == cliente_id}
+    """le o ficheiro de auditoria local e devolve eventos do cliente no intervalo temporal"""
+    tags_do_cliente = _obter_tags_do_cliente(cliente_id)
+    limite_x, limite_y = _obter_limites_mapa_cliente(cliente_id)
 
     eventos: list[dict] = []
     csv_path = Path(__file__).parent / "auditoria_tags.csv"
@@ -438,8 +474,8 @@ def _carregar_eventos_csv(inicio_dt: datetime, fim_dt: datetime, cliente_id: str
             x_norm, y_norm = None, None
             match = re.search(r"X:(\d+(?:\.\d+)?)\s+Y:(\d+(?:\.\d+)?)", descricao)
             if match:
-                x_norm = round(float(match.group(1)) / LIMITE_X_CM, 5)
-                y_norm = round(float(match.group(2)) / LIMITE_Y_CM, 5)
+                x_norm = round(float(match.group(1)) / limite_x, 5)
+                y_norm = round(float(match.group(2)) / limite_y, 5)
 
             eventos.append({
                 "tag_id":    tag_id,

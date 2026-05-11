@@ -6,7 +6,6 @@ motor de escuta websocket dmatek para influxdb
 import asyncio
 import json
 import time
-import csv
 from datetime import datetime
 
 import websockets
