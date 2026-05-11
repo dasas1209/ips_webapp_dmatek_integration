@@ -3,8 +3,9 @@ let imagemMapaAuditoria = new Image();
 let imagemLogoMetric4 = new Image();
 let logoCarregado = false;
 let presetAtivo = "4h";
+const cfg = window.RUNTIME_CONFIG || {};
 
-const COR_TAGS = [
+const COR_TAGS = cfg.chart?.tagPalette || [
     "#e63946", "#457b9d", "#2a9d8f", "#e9c46a", "#f4a261",
     "#264653", "#8338ec", "#fb5607", "#3a86ff", "#06d6a0",
     "#ffbe0b", "#f72585", "#4cc9f0", "#7209b7", "#b5179e",
@@ -151,7 +152,7 @@ function renderizarPreview(dados, iv) {
     document.getElementById("preview-section").style.display = "block";
     window.scrollTo({ top: document.getElementById("preview-section").offsetTop - 20, behavior: "smooth" });
 
-    document.getElementById("badge-periodo-preview").textContent = `${formatarData(iv.inicio)} ? ${formatarData(iv.fim)}`;
+    document.getElementById("badge-periodo-preview").textContent = `${formatarData(iv.inicio)} -> ${formatarData(iv.fim)}`;
 
     document.getElementById("res-distancia").textContent = `${dados.kpis_frota.distancia_total_m} m`;
     document.getElementById("res-bateria").textContent = `${dados.kpis_frota.bateria_media_perc}%`;

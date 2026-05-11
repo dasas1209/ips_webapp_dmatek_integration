@@ -2,7 +2,7 @@
 color 0A
 cd /d "%~dp0"
 echo ===================================================
-echo       Metric4 - SISTEMA DE MONITORIZACAO INTEGRADO
+echo       Metric4 - RTLS
 echo ===================================================
 echo.
 echo [1] A instalar/atualizar dependencias (requirements.txt)...

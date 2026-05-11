@@ -1,4 +1,5 @@
 ﻿const instanciasGraficos = new Map();
+const cfg = window.RUNTIME_CONFIG || {};
 
 function criarOuAtualizarGrafico(canvasId, wrapperId, labels, valores, labelY, cor) {
     const canvasEl = document.getElementById(canvasId);
@@ -48,46 +49,21 @@ function criarOuAtualizarGrafico(canvasId, wrapperId, labels, valores, labelY, c
     instanciasGraficos.set(canvasId, novoGrafico);
 }
 
-async function obterClienteDePosicoes() {
-    const token = obterToken();
-    if (!token) return null;
-
-    try {
-        const respostaPosicoes = await fetch("/posicoes", {
-            headers: { Authorization: "Bearer " + token },
-        });
-        if (!respostaPosicoes.ok) return null;
-        const pacote = await respostaPosicoes.json();
-        return pacote.cliente || null;
-    } catch {
-        return null;
-    }
-}
-
 async function atualizarPainelDiretor() {
-    const tenantStorage = obterTenantId();
-    const tenantPosicoes = await obterClienteDePosicoes();
     const token = obterToken();
-    const candidatos = [...new Set([tenantStorage, tenantPosicoes].filter(Boolean))];
+    const tenant = obterTenantId();
 
-    if (candidatos.length === 0 || !token) {
+    if (!tenant || !token) {
         window.location.href = "/";
         return;
     }
 
     try {
-        let dados = null;
-        for (const tenant of candidatos) {
-            const resposta = await fetch(`/kpis/${encodeURIComponent(tenant)}`, {
-                headers: { Authorization: "Bearer " + token },
-            });
-            if (!resposta.ok) continue;
-            const tentativa = await resposta.json();
-            if (tentativa?.sucesso) {
-                dados = tentativa;
-                break;
-            }
-        }
+        const resposta = await fetch(cfg.api?.kpisPath || "/kpis", {
+            headers: { Authorization: "Bearer " + token },
+        });
+        if (!resposta.ok) return;
+        const dados = await resposta.json();
         if (!dados) return;
 
         document.getElementById("kpi-distancia").innerText = `${dados.kpis.distancia_percorrida_metros} m`;
@@ -97,9 +73,9 @@ async function atualizarPainelDiretor() {
         const etiquetasTags = Object.keys(dados.grafico_distancias).sort();
 
         const configGraficos = [
-            { canvasId: "graficoDistancias", wrapperId: "wrapperDistancias", dataMap: dados.grafico_distancias, labelY: "Distância (m)", cor: "#0d6efd" },
-            { canvasId: "graficoUtilizacao", wrapperId: "wrapperUtilizacao", dataMap: dados.grafico_utilizacao, labelY: "Taxa de Utilização (%)", cor: "#28a745" },
-            { canvasId: "graficoBateria", wrapperId: "wrapperBateria", dataMap: dados.grafico_bateria, labelY: "Bateria (%)", cor: "#fd7e14" },
+            { canvasId: "graficoDistancias", wrapperId: "wrapperDistancias", dataMap: dados.grafico_distancias, labelY: "Distância (m)", cor: cfg.chart?.distancias || "#0d6efd" },
+            { canvasId: "graficoUtilizacao", wrapperId: "wrapperUtilizacao", dataMap: dados.grafico_utilizacao, labelY: "Taxa de Utilização (%)", cor: cfg.chart?.utilizacao || "#28a745" },
+            { canvasId: "graficoBateria", wrapperId: "wrapperBateria", dataMap: dados.grafico_bateria, labelY: "Bateria (%)", cor: cfg.chart?.bateria || "#fd7e14" },
         ];
 
         configGraficos.forEach(({ canvasId, wrapperId, dataMap, labelY, cor }) => {

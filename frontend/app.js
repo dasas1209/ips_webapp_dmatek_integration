@@ -1,7 +1,8 @@
-﻿const LIMITE_X_CM = 760;
-const LIMITE_Y_CM = 500;
-const MAX_RASTO_PONTOS = 5000;
-const TEMPO_OFFLINE_SEG = 10;
+﻿const cfg = window.RUNTIME_CONFIG || {};
+const LIMITE_X_CM = cfg.map?.limiteXcm ?? 760;
+const LIMITE_Y_CM = cfg.map?.limiteYcm ?? 500;
+const MAX_RASTO_PONTOS = cfg.map?.maxRastoPontos ?? 5000;
+const TEMPO_OFFLINE_SEG = cfg.timing?.tempoOfflineSeg ?? 10;
 
 const canvas = document.getElementById("mapaFabrica");
 const ctx = canvas ? canvas.getContext("2d") : null;
@@ -61,11 +62,9 @@ function obterNomeUtilizador() {
 }
 
 function setThemeTenant(tenant) {
-    const base = String(tenant || "metric4").toLowerCase();
-    let cor = "#3b82f6";
-    if (base.includes("sul")) cor = "#7c3aed";
-    else if (base.includes("norte")) cor = "#0ea5e9";
-    else if (base.includes("log")) cor = "#16a34a";
+    const tenantId = String(tenant || "").toLowerCase();
+    const temas = cfg.tenantTheme?.byTenantId || {};
+    const cor = temas[tenantId] || cfg.tenantTheme?.defaultPrimary || "#3b82f6";
 
     document.documentElement.style.setProperty("--tenant-primary", cor);
     document.documentElement.style.setProperty("--tenant-primary-soft", `${cor}22`);
@@ -81,7 +80,7 @@ async function fazerLogin(event) {
     formData.append("password", pass);
 
     try {
-        const resposta = await fetch("/login", {
+        const resposta = await fetch(cfg.api?.loginPath || "/login", {
             method: "POST",
             headers: { "Content-Type": "application/x-www-form-urlencoded" },
             body: formData.toString(),
@@ -108,7 +107,11 @@ async function mudarParaDashboard() {
     els.login.classList.add("escondido");
     els.dashboard.classList.remove("escondido");
 
-    const tenant = obterTenantId() || "Tenant";
+    const tenant = obterTenantId();
+    if (!tenant) {
+        fazerLogout();
+        return;
+    }
     const utilizador = obterNomeUtilizador();
     els.topbarUser.textContent = `Utilizador: ${utilizador}`;
 
@@ -120,15 +123,14 @@ async function mudarParaDashboard() {
     await atualizarKpisDiretor();
 
     if (state.loopAtualizacao) clearInterval(state.loopAtualizacao);
-    state.loopAtualizacao = setInterval(obterPosicoes, 2000);
+    state.loopAtualizacao = setInterval(obterPosicoes, cfg.timing?.refreshPosicoesMs ?? 2000);
 
     if (state.loopAtualizacaoKpis) clearInterval(state.loopAtualizacaoKpis);
-    state.loopAtualizacaoKpis = setInterval(atualizarKpisDiretor, 60000);
+    state.loopAtualizacaoKpis = setInterval(atualizarKpisDiretor, cfg.timing?.refreshKpisMs ?? 60000);
 }
 
 function setTenantInfo(tenant) {
     state.tenant = tenant;
-    if (tenant) localStorage.setItem("tenant_id", tenant);
     const iniciais = tenant
         .split(/\s+/)
         .filter(Boolean)
@@ -162,12 +164,14 @@ async function obterPosicoes() {
     }
 
     try {
-        const resposta = await fetch("/posicoes", {
+        const resposta = await fetch(cfg.api?.posicoesPath || "/posicoes", {
             headers: { Authorization: "Bearer " + token },
         });
 
-        if (resposta.status === 403) {
-            setOverlayState("Sem permissão para aceder a este tenant.");
+        if (resposta.status === 401 || resposta.status === 403) {
+            setOverlayState("Sessão inválida. Autentique-se novamente.");
+            els.estadoLigacao.textContent = "Sessão expirada.";
+            fazerLogout();
             return;
         }
 
@@ -181,14 +185,17 @@ async function obterPosicoes() {
         setOverlayState("");
         els.estadoLigacao.textContent = `Ligado. Última atualização: ${new Date().toLocaleTimeString("pt-PT")}`;
 
-        if (pacoteDados.cliente) {
-            setTenantInfo(pacoteDados.cliente);
-            setThemeTenant(pacoteDados.cliente);
+        if (pacoteDados.cliente && pacoteDados.cliente !== state.tenant) {
+            setOverlayState("Tenant de sessão inconsistente.");
+            els.estadoLigacao.textContent = "A terminar sessão por segurança.";
+            fazerLogout();
+            return;
         }
 
         carregarMapaDoTenant(state.tenant);
 
-        state.dadosCompletos = normalizarAssets(pacoteDados.dados || []);
+        const normalizados = normalizarAssets(pacoteDados.dados || []);
+        state.dadosCompletos = filtrarDadosSessaoTempoReal(normalizados);
         atualizarFiltrosDisponiveis(state.dadosCompletos);
         state.dadosFiltrados = aplicarFiltros(state.dadosCompletos);
 
@@ -225,6 +232,18 @@ function normalizarAssets(dados) {
     });
 }
 
+function filtrarDadosSessaoTempoReal(dados) {
+    const minutosAtras = obterMinutosAtras();
+    if (minutosAtras > 0) return dados;
+
+    const loginTsRaw = localStorage.getItem("login_timestamp");
+    if (!loginTsRaw) return dados;
+
+    const loginTs = new Date(loginTsRaw);
+    if (Number.isNaN(loginTs.getTime())) return dados;
+    return dados.filter((asset) => new Date(asset.timestamp) >= loginTs);
+}
+
 function atualizarFiltrosDisponiveis(dados) {
     const mapas = [...new Set(dados.map((a) => a.mapa))].sort();
     preencherFiltrosMapa(mapas);
@@ -243,12 +262,11 @@ function aplicarFiltros(dados) {
 }
 
 async function atualizarKpisDiretor() {
-    const tenant = state.tenant || obterTenantId();
     const token = obterToken();
-    if (!tenant || !token || els.dashboard.classList.contains("escondido")) return;
+    if (!token || els.dashboard.classList.contains("escondido")) return;
 
     try {
-        const resposta = await fetch(`/kpis/${encodeURIComponent(tenant)}`, {
+        const resposta = await fetch(cfg.api?.kpisPath || "/kpis", {
             headers: { Authorization: "Bearer " + token },
         });
         const dados = await resposta.json();
@@ -325,8 +343,11 @@ function desenharFabrica(assets) {
 
         const ultimaLeitura = new Date(tag.timestamp);
         const tempoSemSinalSegundos = (agora - ultimaLeitura) / 1000;
-        if (tempoSemSinalSegundos > 10) {
-            const raioIncerteza = Math.min(10 + tempoSemSinalSegundos * 0.5, 50);
+        if (tempoSemSinalSegundos > TEMPO_OFFLINE_SEG) {
+            const raioIncerteza = Math.min(
+                (cfg.map?.baseRaioIncertezaPx ?? 10) + tempoSemSinalSegundos * (cfg.map?.crescimentoRaioIncertezaPx ?? 0.5),
+                cfg.map?.maxRaioIncertezaPx ?? 50
+            );
             ctx.beginPath();
             ctx.arc(px, py, raioIncerteza, 0, 2 * Math.PI);
             ctx.fillStyle = "rgba(255, 165, 0, 0.3)";
@@ -428,7 +449,7 @@ function gerarToastsCriticos(dados) {
     criticos.forEach((asset) => {
         const agora = Date.now();
         const ultimo = state.ultimoToastPorTag.get(asset.tag_id) || 0;
-        if (agora - ultimo < 15000) return;
+        if (agora - ultimo < (cfg.timing?.toastCooldownMs ?? 15000)) return;
 
         state.ultimoToastPorTag.set(asset.tag_id, agora);
         criarToast(`Alerta crítico em ${asset.tag_id}. Verifique o estado imediatamente.`, true);
@@ -444,8 +465,8 @@ function criarToast(mensagem, critico = false) {
     setTimeout(() => {
         toast.style.opacity = "0";
         toast.style.transform = "translateY(-8px)";
-        setTimeout(() => toast.remove(), 180);
-    }, 4200);
+        setTimeout(() => toast.remove(), cfg.timing?.toastFadeMs ?? 180);
+    }, cfg.timing?.toastVisibleMs ?? 4200);
 }
 
 function renderizarDropdownNotificacoes() {
@@ -478,7 +499,7 @@ function obterMinutosAtras() {
 async function verPassado(minutos) {
     const token = obterToken();
     if (!token) return;
-    const resp = await fetch(`/historico?minutos_atras=${minutos}`, {
+    const resp = await fetch(`${cfg.api?.historicoPath || "/historico"}?minutos_atras=${minutos}`, {
         headers: { Authorization: "Bearer " + token },
     });
     if (!resp.ok) return;
@@ -542,7 +563,7 @@ function configurarEventos() {
             const px = (asset.x * canvas.width) / LIMITE_X_CM;
             const py = (asset.y * canvas.height) / LIMITE_Y_CM;
             const dist = Math.hypot(px - x, py - y);
-            if (dist < melhorDist && dist < 20) {
+            if (dist < melhorDist && dist < (cfg.map?.pickRadiusPx ?? 20)) {
                 melhorDist = dist;
                 candidato = asset;
             }
@@ -562,7 +583,7 @@ function configurarEventos() {
         if (minutosAtras === 0) {
             els.labelMinutos.textContent = "Tempo real";
             els.wrapperMapa.classList.remove("piscar-vermelho");
-            if (!state.loopAtualizacao) state.loopAtualizacao = setInterval(obterPosicoes, 2000);
+            if (!state.loopAtualizacao) state.loopAtualizacao = setInterval(obterPosicoes, cfg.timing?.refreshPosicoesMs ?? 2000);
             await obterPosicoes();
             return;
         }
@@ -581,7 +602,7 @@ function configurarEventos() {
 }
 
 function carregarMapaDoTenant(tenant) {
-    const caminho = `/static/assets/mapa_${tenant}.png`;
+    const caminho = `/static/assets/mapa_${encodeURIComponent(tenant)}.png`;
     if (!tenant || state.imagemMapa.src.includes(caminho)) return;
     state.imagemMapa.src = caminho;
     state.imagemMapa.onload = () => desenharFabrica(state.dadosFiltrados);
