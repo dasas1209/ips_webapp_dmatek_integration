@@ -1,4 +1,4 @@
-/**
+﻿/**
  * auth.js
  * modulo partilhado de autenticacao metric4 rtls
  * incluir antes de qualquer outro script que precise de autenticacao:
@@ -43,3 +43,4 @@ function redirecionarSeNaoAutenticado() {
         window.location.href = "/";
     }
 }
+

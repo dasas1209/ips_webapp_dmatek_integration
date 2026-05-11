@@ -1,106 +1,156 @@
-<!DOCTYPE html>
-<html lang="pt">
-
+﻿<!DOCTYPE html>
+<html lang="pt-PT">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Metric4 - Monitorização Industrial</title>
-    <link rel="stylesheet" href="/static/style.css?v=1.3">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-
+    <title>Metric4 RTLS - Operações em Tempo Real</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css?v=3.1">
 </head>
-
 <body>
+    <div id="toastContainer" class="toast-stack" aria-live="polite" aria-atomic="true"></div>
 
-    <div id="seccao_login" class="caixa">
-        <h2>Acesso à Fábrica</h2>
-        <input type="text" id="username" placeholder="Identificação (ex: gestor_a)">
-        <input type="password" id="password" placeholder="Palavra-passe">
-        <button onclick="fazerLogin()">Entrar</button>
-        <p id="mensagem_erro" style="color: red;"></p>
-    </div>
+    <main id="seccao_login" class="login-screen">
+        <section class="login-card">
+            <img src="/static/assets/metric-logo.svg" alt="Metric4" class="metric-logo login-logo">
+            <p class="login-eyebrow">Metric4 RTLS</p>
+            <h1>Acesso ao Tenant</h1>
+            <p class="login-copy">Entre com as credenciais da sua organização para consultar os ativos em tempo real.</p>
+            <form id="formLogin" class="login-form">
+                <label for="username">Utilizador</label>
+                <input type="text" id="username" autocomplete="username" placeholder="ex: operador_norte" required>
 
-    <div id="painel_diretor" class="painel-diretor escondido" style="display:none;">
-        <div class="kpi-card">
-            <h3>Distância Total (Frota)</h3>
-            <p id="kpi-distancia">0 m</p>
-        </div>
-        <div class="kpi-card">
-            <h3>OEE Frota (Utilização)</h3>
-            <p id="kpi-utilizacao">0 %</p>
-        </div>
-        <div class="kpi-card">
-            <h3>Saúde Baterias (Média)</h3>
-            <p id="kpi-bateria">0 %</p>
-        </div>
+                <label for="password">Palavra-passe</label>
+                <input type="password" id="password" autocomplete="current-password" placeholder="Introduza a palavra-passe" required>
 
-        <button class="btn-relatorio" onclick="window.location.href='relatorio.html'">KPIs por Tag</button>
-        <button class="btn-auditoria" onclick="window.location.href='auditoria.html'">Auditoria</button>
+                <button type="submit" class="btn btn-primary">Entrar</button>
+                <p id="mensagem_erro" class="login-error" role="alert"></p>
+            </form>
+        </section>
+    </main>
 
-        <div style="margin: 10px; padding: 10px; background: #f8f9fa; border-radius: 8px; border: 1px solid #ddd;">
-            <label class="switch">
-                <input type="checkbox" id="checkRasto">
-                <span class="slider"></span>
-            </label>
-            <span style="font-weight: bold; margin-left: 10px;">Ativar Modo Rasto (Heatmap)</span>
-        </div>
-
-    </div>
-
-
-    <div id="seccao_dashboard" class="escondido">
-        <h2>Painel de Controlo - <span id="nome_cliente"></span></h2>
-        <button onclick="fazerLogout()" style="background-color: #dc3545; width: auto;">Sair (Devolver Crachá)</button>
-        <button onclick="obterPosicoes()" style="background-color: #28a745; width: auto;">Atualizar Dados</button>
-
-        <div class="dashboard-container">
-
-            <div class="mapa-container">
-                <h3>Planta da Fábrica (Monitorização Ativa):</h3>
-                <div id="wrapperMapa"
-                    style="position: relative; display: inline-block; background: white; border: 2px solid #ccc;">
-                    <canvas id="mapaFabrica" width="800" height="600"></canvas>
+    <div id="seccao_dashboard" class="app-shell escondido">
+        <aside class="sidebar-nav">
+            <img src="/static/assets/metric-logo.svg" alt="Metric4" class="metric-logo sidebar-logo">
+            <div class="tenant-branding">
+                <div class="tenant-avatar" id="tenantAvatar">M4</div>
+                <div>
+                    <h2 id="tenantNameSidebar">-</h2>
                 </div>
+            </div>
 
-                <div id="controlo-historico"
-                    style="background: #e9ecef; padding: 15px; border-radius: 10px; margin-top: 10px;">
-                    <label for="sliderTempo"
-                        style="font-weight: bold; display: flex; justify-content: space-between; margin-bottom: 5px;">
-                        <span>Recuar no Tempo</span>
-                        <span id="labelMinutos" style="color: #0d6efd;">Tempo Real</span>
-                    </label>
-                    <input type="range" id="sliderTempo" min="0" max="480" value="480" step="1" style="width: 100%;">
-                    <div
-                        style="display: flex; justify-content: space-between; font-size: 11px; color: #6c757d; margin-top: 5px;">
-                        <span>Há 8 horas</span>
-                        <span>Agora</span>
+            <nav class="tenant-menu">
+                <button class="menu-item active" type="button">Mapa operacional</button>
+                <button class="menu-item" type="button" onclick="window.location.href='relatorio.html'">Relatórios de KPI</button>
+                <button class="menu-item" type="button" onclick="window.location.href='auditoria.html'">Auditoria</button>
+            </nav>
+
+            <section class="sidebar-section">
+                <h3>Filtros</h3>
+                <label for="filtroMapa">Mapa</label>
+                <select id="filtroMapa"></select>
+            </section>
+
+            <section class="sidebar-section">
+                <h3>Estado de ligação</h3>
+                <p id="estadoLigacao" class="muted">A aguardar dados do servidor...</p>
+            </section>
+        </aside>
+
+        <section class="main-layout">
+            <header class="topbar">
+                <div class="topbar-left">
+                    <img src="/static/assets/metric-logo.svg" alt="Metric4" class="metric-logo topbar-logo">
+                    <p>Centro de monitorização RTLS</p>
+                </div>
+                <div class="topbar-right">
+                    <div class="notificacoes-wrap" id="notificacoesWrap">
+                        <button id="btnNotificacoes" class="btn btn-ghost" type="button" aria-expanded="false">
+                            Notificações <span id="badgeNotificacoes" class="badge-pill">0</span>
+                        </button>
+                        <div id="dropdownNotificacoes" class="notificacoes-dropdown escondido"></div>
+                    </div>
+                    <span class="user-chip" id="utilizadorAtivo">Utilizador: -</span>
+                    <button id="btnAtualizar" class="btn btn-secondary" type="button">Atualizar</button>
+                    <button id="btnLogout" class="btn btn-danger" type="button">Terminar sessão</button>
+                </div>
+            </header>
+
+            <section class="metrics-grid" id="metricasTopo">
+                <article class="metric-card skeleton-card">
+                    <p>Total de assets</p>
+                    <strong id="metricaTotal">--</strong>
+                </article>
+                <article class="metric-card skeleton-card">
+                    <p>Ativos agora</p>
+                    <strong id="metricaAtivos">--</strong>
+                </article>
+                <article class="metric-card skeleton-card">
+                    <p>Alertas críticos</p>
+                    <strong id="metricaAlertas">--</strong>
+                </article>
+            </section>
+
+            <section class="workspace-grid" id="workspaceGrid">
+                <div class="map-section">
+                    <div class="map-header">
+                        <h2>Mapa operacional</h2>
+                        <div class="map-tools">
+                            <label class="switch-control" for="checkRasto">
+                                <input type="checkbox" id="checkRasto">
+                                <span>Modo rasto</span>
+                            </label>
+                            <label for="sliderTempo">Janela temporal</label>
+                            <input type="range" id="sliderTempo" min="0" max="480" value="480" step="1">
+                            <span id="labelMinutos">Tempo real</span>
+                        </div>
+                    </div>
+
+                    <div id="wrapperMapa" class="map-wrapper">
+                        <canvas id="mapaFabrica" width="1280" height="720"></canvas>
+                        <div id="mapOverlayState" class="overlay-state escondido"></div>
                     </div>
                 </div>
-            </div>
 
-            <div class="sidebar">
+                <aside class="asset-panel" id="assetPanel">
+                    <div class="asset-panel-header">
+                        <h2>Detalhes de asset</h2>
+                    </div>
+                    <div id="assetDetailBody" class="asset-detail-body empty-state-card">
+                        <h3>Nenhum asset selecionado</h3>
+                        <p>Selecione um ponto no mapa ou uma linha na tabela para abrir os detalhes operacionais.</p>
+                    </div>
+                </aside>
+            </section>
 
-                <div class="painel-critico">
-                    <h3>🚨 Alertas Críticos</h3>
-                    <ul id="lista_alertas">
-                        <li class="placeholder">Nenhum alerta ativo. Sistema normal.</li>
-                    </ul>
+            <section class="table-card">
+                <div class="table-header">
+                    <h2>Assets monitorizados</h2>
+                    <p id="tabelaResumo" class="muted">Sem dados carregados.</p>
                 </div>
-
-                <div class="painel-manutencao">
-                    <h3>🔋 Manutenção de Baterias</h3>
-                    <ul id="lista_baterias">
-                        <li class="placeholder">Todas as baterias operacionais.</li>
-                    </ul>
+                <div class="table-scroll">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Asset ID</th>
+                                <th>Nome</th>
+                                <th>Mapa</th>
+                                <th>Estado</th>
+                                <th>Bateria</th>
+                                <th>Última leitura</th>
+                            </tr>
+                        </thead>
+                        <tbody id="corpoTabelaAssets"></tbody>
+                    </table>
                 </div>
-
-            </div>
-
-        </div>
+            </section>
+        </section>
     </div>
 
     <script src="/static/auth.js"></script>
-    <script src="/static/app.js?v=4.0"></script>
+    <script src="/static/app.js?v=5.1"></script>
 </body>
-
 </html>
+

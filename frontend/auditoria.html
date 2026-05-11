@@ -1,35 +1,36 @@
-<!DOCTYPE html>
-<html lang="pt">
+﻿<!DOCTYPE html>
+<html lang="pt-PT">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Relatório de Auditoria — Metric4</title>
     <meta name="description" content="Gerador de relatórios de auditoria industrial RTLS — Diagrama de Esparguete, KPIs e Log de Incidentes.">
-    <link rel="stylesheet" href="/static/style.css?v=2.0">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css?v=3.1">
     <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
-<body style="background-color:#f4f6fb; padding:0; margin:0;">
-
-<div class="auditoria-page">
-
-    <!-- ── CABEÇALHO ── -->
-    <div class="auditoria-header">
-        <button class="btn-voltar" onclick="window.location.href='/'">← Voltar ao Mapa</button>
-        <h1>Relatório de Auditoria Industrial</h1>
-        <span class="badge-sistema">Metric4 RTLS</span>
-        <span id="badge-cliente" style="margin-left:auto; font-size:13px; color:#4a5568; font-weight:600;"></span>
+<body>
+<main class="page-shell">
+    <div class="page-top">
+        <div class="auditoria-header">
+            <img src="/static/assets/metric-logo.svg" alt="Metric4" class="metric-logo page-logo">
+            <h1>Relatório de Auditoria Industrial</h1>
+            <span class="badge-sistema">Metric4 RTLS</span>
+            <span id="badge-cliente" style="margin-left:auto; font-size:13px; color:#4a5568; font-weight:600;"></span>
+        </div>
+        <button class="btn btn-secondary" onclick="window.location.href='/'">Voltar ao mapa</button>
     </div>
 
-
-    <!-- ── PASSO 1: Janela Temporal ── -->
     <div class="wizard-panel" id="painel-passo1">
         <h2>Janela Temporal</h2>
 
         <div class="preset-buttons">
-            <button class="btn-preset selected" id="preset-4h"  onclick="aplicarPreset('4h')">Últimas 4h</button>
-            <button class="btn-preset"           id="preset-8h"  onclick="aplicarPreset('8h')">Últimas 8h</button>
-            <button class="btn-preset"           id="preset-custom" onclick="aplicarPreset('custom')">Personalizado</button>
+            <button class="btn-preset selected" id="preset-4h" onclick="aplicarPreset('4h')">Últimas 4h</button>
+            <button class="btn-preset" id="preset-8h" onclick="aplicarPreset('8h')">Últimas 8h</button>
+            <button class="btn-preset" id="preset-custom" onclick="aplicarPreset('custom')">Personalizado</button>
         </div>
 
         <div class="datetime-row" id="row-custom" style="display:none;">
@@ -45,7 +46,6 @@
         <p class="aviso-intervalo" id="aviso-intervalo">Intervalo máximo permitido: 30 dias.</p>
     </div>
 
-    <!-- ── PASSO 2: Secções ── -->
     <div class="wizard-panel" id="painel-passo2">
         <h2>Secções do Relatório</h2>
 
@@ -68,7 +68,6 @@
         </div>
     </div>
 
-    <!-- ── PASSO 3: Exportação ── -->
     <div class="wizard-panel" id="painel-passo3">
         <h2>Gerar e Exportar</h2>
 
@@ -84,14 +83,12 @@
         </div>
     </div>
 
-    <!-- ── ÁREA DE PREVIEW ── -->
     <div class="preview-section" id="preview-section" style="display:none;">
         <h2>
             Preview do Relatório
             <span class="badge-periodo" id="badge-periodo-preview"></span>
         </h2>
 
-        <!-- KPIs Resumo -->
         <div class="kpi-resumo-grid" id="kpi-resumo-grid">
             <div class="kpi-resumo-card">
                 <div class="kpi-resumo-valor" id="res-distancia">—</div>
@@ -112,14 +109,11 @@
         </div>
 
         <div class="preview-grid">
-
-            <!-- Diagrama de Esparguete -->
             <div class="preview-card full-width" id="card-esparguete">
                 <h3>Diagrama de Esparguete</h3>
                 <canvas id="canvasEsparguetePreview"></canvas>
             </div>
 
-            <!-- Tabela KPIs por Tag -->
             <div class="preview-card" id="card-kpis">
                 <h3>KPIs por Tag</h3>
                 <div style="overflow-x:auto;">
@@ -139,18 +133,16 @@
                 </div>
             </div>
 
-            <!-- Log de Incidentes -->
             <div class="preview-card" id="card-incidentes">
                 <h3>Log de Incidentes</h3>
                 <ul class="incident-list" id="lista-incidentes"></ul>
             </div>
-
         </div>
     </div>
-
-</div><!-- /auditoria-page -->
+</main>
 
 <script src="/static/auth.js"></script>
-<script src="/static/auditoria.js?v=2.0"></script>
+<script src="/static/auditoria.js?v=3.1"></script>
 </body>
 </html>
+

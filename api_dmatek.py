@@ -4,9 +4,13 @@ api rest do sistema metric4 rtls
 """
 import math
 import re
+import csv
+import logging
+import time
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from threading import Lock
 from typing import Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Query
@@ -52,6 +56,10 @@ app.add_middleware(
 
 app.mount("/static", StaticFiles(directory="frontend"), name="static")
 
+# logging de seguranca (sem coordenadas para minimizar exposição de localização)
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("metric4.api")
+
 # serving de paginas html
 
 @app.get("/", include_in_schema=False)
@@ -72,12 +80,63 @@ async def serve_auditoria():
 
 # base de dados de utilizadores placeholder
 
-UTILIZADORES: dict[str, dict] = {
-    "gestor_a": {"password": "123", "tenant_id": "cliente_A"},
-    "gestor_b": {"password": "456", "tenant_id": "cliente_B"},
-    "gestor_c": {"password": "789", "tenant_id": "cliente_C"},
-    "gestor_d": {"password": "abc", "tenant_id": "cliente_A"},
-}
+def carregar_utilizadores_placeholder(caminho: Path | str | None = None) -> dict[str, dict]:
+    """carrega utilizadores de um csv placeholder externo"""
+    if caminho is None:
+        caminho = Path(__file__).parent / "utilizadores_placeholder.csv"
+
+    caminho = Path(caminho)
+    utilizadores: dict[str, dict] = {}
+
+    if not caminho.exists():
+        raise RuntimeError(
+            f"CSV de utilizadores placeholder não encontrado: {caminho.name}."
+        )
+
+    with open(caminho, encoding="utf-8") as fh:
+        reader = csv.DictReader(fh, delimiter=";")
+        for linha in reader:
+            username = linha.get("username", "").strip()
+            password = linha.get("password", "").strip()
+            tenant_id = linha.get("tenant_id", "").strip()
+            if username and password and tenant_id:
+                utilizadores[username] = {"password": password, "tenant_id": tenant_id}
+
+    if not utilizadores:
+        raise RuntimeError(
+            "CSV de utilizadores placeholder vazio ou inválido. "
+            "Esperadas colunas: username;password;tenant_id."
+        )
+
+    logger.info("Utilizadores placeholder carregados: %s", len(utilizadores))
+    return utilizadores
+
+
+UTILIZADORES: dict[str, dict] = carregar_utilizadores_placeholder()
+
+
+class TenantRateLimiter:
+    """throttling em memória por tenant para reduzir risco de noisy neighbor"""
+
+    def __init__(self, max_requests: int, window_seconds: int):
+        self.max_requests = max_requests
+        self.window_seconds = window_seconds
+        self._state: dict[str, dict[str, float | int]] = {}
+        self._lock = Lock()
+
+    def allow(self, tenant_id: str) -> bool:
+        now = time.monotonic()
+        with self._lock:
+            tenant_state = self._state.get(tenant_id)
+            if tenant_state is None or (now - float(tenant_state["window_start"])) >= self.window_seconds:
+                self._state[tenant_id] = {"window_start": now, "count": 1}
+                return True
+
+            tenant_state["count"] = int(tenant_state["count"]) + 1
+            return int(tenant_state["count"]) <= self.max_requests
+
+
+tenant_rate_limiter = TenantRateLimiter(max_requests=120, window_seconds=60)
 
 # configuracao de seguranca jwt
 
@@ -103,6 +162,17 @@ def verificar_token(token: str = Depends(oauth2_scheme)) -> str:
         raise HTTPException(status_code=401, detail="Acesso negado: token inválido ou expirado.")
 
 
+def aplicar_rate_limit(tenant_id: str = Depends(verificar_token)) -> str:
+    """aplica throttling por tenant em endpoints autenticados"""
+    if not tenant_rate_limiter.allow(tenant_id):
+        logger.warning("Rate limit excedido para tenant_id=%s", tenant_id)
+        raise HTTPException(
+            status_code=429,
+            detail="Limite de pedidos por minuto excedido para este tenant.",
+        )
+    return tenant_id
+
+
 # rotas de autenticacao
 
 @app.post("/login", tags=["Autenticação"])
@@ -115,6 +185,7 @@ def login(credenciais: OAuth2PasswordRequestForm = Depends()):
         raise HTTPException(status_code=401, detail="Password incorreta.")
 
     tenant_id = utilizador["tenant_id"]
+    logger.info("Login bem-sucedido para user=%s tenant_id=%s", credenciais.username, tenant_id)
     token = criar_token_jwt({"sub": credenciais.username, "tenant_id": tenant_id})
     return {
         "access_token": token,
@@ -127,7 +198,7 @@ def login(credenciais: OAuth2PasswordRequestForm = Depends()):
 # rotas de tempo real
 
 @app.get("/posicoes", tags=["Real-Time"])
-def obter_posicoes(tenant_id: str = Depends(verificar_token)):
+def obter_posicoes(tenant_id: str = Depends(aplicar_rate_limit)):
     """devolve ultima posicao conhecida de cada tag"""
     try:
         query = f"""
@@ -169,7 +240,7 @@ def obter_posicoes(tenant_id: str = Depends(verificar_token)):
 @app.get("/historico", tags=["Real-Time"])
 def obter_historico(
     minutos_atras: int = Query(..., ge=1, le=480, description="Minutos a recuar (1–480)"),
-    tenant_id: str = Depends(verificar_token),
+    tenant_id: str = Depends(aplicar_rate_limit),
 ):
     """devolve posicoes num instante historico especifico"""
     try:
@@ -211,18 +282,8 @@ def obter_historico(
 
 # rotas de kpis
 
-@app.get("/kpis/{tenant_id}", tags=["KPIs"])
-async def obter_kpis_turno(
-    tenant_id: str,
-    token_tenant: str = Depends(verificar_token),
-):
+async def _obter_kpis_turno_por_tenant(tenant_id: str):
     """calcula kpis da frota no turno actual"""
-    if tenant_id != token_tenant:
-        raise HTTPException(
-            status_code=403,
-            detail="Acesso negado: não tem permissão para ver os KPIs deste cliente.",
-        )
-
     query = f"""
         from(bucket: "{INFLUX_BUCKET}")
         |> range(start: -{JANELA_KPI_HORAS}h)
@@ -315,6 +376,28 @@ async def obter_kpis_turno(
         return {"sucesso": False, "erro": str(exc)}
 
 
+@app.get("/kpis", tags=["KPIs"])
+async def obter_kpis_turno(tenant_id: str = Depends(aplicar_rate_limit)):
+    """devolve kpis usando tenant extraído do token"""
+    logger.info("Consulta de KPIs para tenant_id=%s", tenant_id)
+    return await _obter_kpis_turno_por_tenant(tenant_id)
+
+
+@app.get("/kpis/{tenant_id}", tags=["KPIs"], include_in_schema=False)
+async def obter_kpis_turno_legado(
+    tenant_id: str,
+    token_tenant: str = Depends(aplicar_rate_limit),
+):
+    """rota legacy: mantém compatibilidade sem permitir troca de tenant"""
+    if tenant_id != token_tenant:
+        raise HTTPException(
+            status_code=403,
+            detail="Acesso negado: não tem permissão para ver os KPIs deste cliente.",
+        )
+    logger.info("Consulta de KPIs (legacy) para tenant_id=%s", token_tenant)
+    return await _obter_kpis_turno_por_tenant(token_tenant)
+
+
 # rotas de auditoria
 
 def _carregar_eventos_csv(inicio_dt: datetime, fim_dt: datetime, cliente_id: str) -> list[dict]:
@@ -375,7 +458,7 @@ def _carregar_eventos_csv(inicio_dt: datetime, fim_dt: datetime, cliente_id: str
 def obter_dados_auditoria(
     inicio: str = Query(..., description="Início ISO 8601, ex: 2026-05-11T06:00:00Z"),
     fim:    str = Query(..., description="Fim ISO 8601, ex: 2026-05-11T14:00:00Z"),
-    cliente_id: str = Depends(verificar_token),
+    cliente_id: str = Depends(aplicar_rate_limit),
 ):
     """consulta fluxo temporal completo para dashboard de auditoria"""
 

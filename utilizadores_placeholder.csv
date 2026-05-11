@@ -1,0 +1,5 @@
+username;password;tenant_id
+gestor_a;123;cliente_A
+gestor_b;456;cliente_B
+gestor_c;789;cliente_C
+gestor_d;abc;cliente_A

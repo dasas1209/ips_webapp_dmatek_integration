@@ -1,32 +1,80 @@
-/**
- * app.js
- * logica exclusiva do dashboard em tempo real
- * depende de auth.js
- */
-
-// constantes de layout
-// Espelham config.py:LIMITE_X_CM / LIMITE_Y_CM.
-// Se as dimensões físicas mudarem, alterar também em config.py.
-const LIMITE_X_CM = 760;
+﻿const LIMITE_X_CM = 760;
 const LIMITE_Y_CM = 500;
-const MAX_RASTO_PONTOS = 5000;   // I-05: cap do heatmap
+const MAX_RASTO_PONTOS = 5000;
+const TEMPO_OFFLINE_SEG = 10;
 
-// estado do modulo
 const canvas = document.getElementById("mapaFabrica");
 const ctx = canvas ? canvas.getContext("2d") : null;
 
-let imagemMapa = new Image();
-let loopAtualizacao = null;
-let loopAtualizacaoKpis = null;
-let modoRastoAtivo = false;
-let historicoRasto = [];
+const state = {
+    imagemMapa: new Image(),
+    loopAtualizacao: null,
+    loopAtualizacaoKpis: null,
+    modoRastoAtivo: false,
+    historicoRasto: [],
+    dadosFiltrados: [],
+    dadosCompletos: [],
+    tenant: "",
+    selectedAssetId: null,
+    ultimoToastPorTag: new Map(),
+    alertasCriticos: [],
+};
 
-// autenticacao e login
+const els = {
+    formLogin: document.getElementById("formLogin"),
+    msgErro: document.getElementById("mensagem_erro"),
+    login: document.getElementById("seccao_login"),
+    dashboard: document.getElementById("seccao_dashboard"),
+    topbarUser: document.getElementById("utilizadorAtivo"),
+    tenantNameSidebar: document.getElementById("tenantNameSidebar"),
+    tenantAvatar: document.getElementById("tenantAvatar"),
+    estadoLigacao: document.getElementById("estadoLigacao"),
+    filtroMapa: document.getElementById("filtroMapa"),
+    metricaTotal: document.getElementById("metricaTotal"),
+    metricaAtivos: document.getElementById("metricaAtivos"),
+    metricaAlertas: document.getElementById("metricaAlertas"),
+    badgeNotificacoes: document.getElementById("badgeNotificacoes"),
+    corpoTabela: document.getElementById("corpoTabelaAssets"),
+    tabelaResumo: document.getElementById("tabelaResumo"),
+    assetDetailBody: document.getElementById("assetDetailBody"),
+    sliderTempo: document.getElementById("sliderTempo"),
+    labelMinutos: document.getElementById("labelMinutos"),
+    checkRasto: document.getElementById("checkRasto"),
+    mapOverlayState: document.getElementById("mapOverlayState"),
+    wrapperMapa: document.getElementById("wrapperMapa"),
+    toastContainer: document.getElementById("toastContainer"),
+    metricasTopo: document.getElementById("metricasTopo"),
+    btnNotificacoes: document.getElementById("btnNotificacoes"),
+    dropdownNotificacoes: document.getElementById("dropdownNotificacoes"),
+    notificacoesWrap: document.getElementById("notificacoesWrap"),
+};
 
-async function fazerLogin() {
-    const user = document.getElementById("username").value;
+function obterNomeUtilizador() {
+    const token = obterToken();
+    if (!token) return "-";
+    try {
+        const payload = JSON.parse(atob(token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
+        return payload.sub || payload.username || payload.user || "-";
+    } catch {
+        return "-";
+    }
+}
+
+function setThemeTenant(tenant) {
+    const base = String(tenant || "metric4").toLowerCase();
+    let cor = "#3b82f6";
+    if (base.includes("sul")) cor = "#7c3aed";
+    else if (base.includes("norte")) cor = "#0ea5e9";
+    else if (base.includes("log")) cor = "#16a34a";
+
+    document.documentElement.style.setProperty("--tenant-primary", cor);
+    document.documentElement.style.setProperty("--tenant-primary-soft", `${cor}22`);
+}
+
+async function fazerLogin(event) {
+    event.preventDefault();
+    const user = document.getElementById("username").value.trim();
     const pass = document.getElementById("password").value;
-    const erroTexto = document.getElementById("mensagem_erro");
 
     const formData = new URLSearchParams();
     formData.append("username", user);
@@ -39,189 +87,257 @@ async function fazerLogin() {
             body: formData.toString(),
         });
 
-        if (resposta.ok) {
-            const dados = await resposta.json();
-            localStorage.setItem("cracha_jwt", dados.access_token);
-            localStorage.setItem("tenant_id", dados.tenant_id);
-            localStorage.setItem("login_timestamp", new Date().toISOString());
-            erroTexto.innerText = "";
-            mudarParaDashboard();
-        } else {
-            erroTexto.innerText = "Credenciais inválidas. Acesso negado.";
+        if (!resposta.ok) {
+            els.msgErro.textContent = "Credenciais inválidas. Verifique os dados e tente novamente.";
+            return;
         }
+
+        const dados = await resposta.json();
+        localStorage.setItem("cracha_jwt", dados.access_token);
+        localStorage.setItem("tenant_id", dados.tenant_id);
+        localStorage.setItem("login_timestamp", new Date().toISOString());
+
+        els.msgErro.textContent = "";
+        await mudarParaDashboard();
     } catch {
-        erroTexto.innerText = "Erro ao contactar o servidor.";
+        els.msgErro.textContent = "Não foi possível contactar o servidor.";
     }
 }
 
 async function mudarParaDashboard() {
-    document.getElementById("seccao_login").classList.add("escondido");
-    document.getElementById("seccao_dashboard").classList.remove("escondido");
+    els.login.classList.add("escondido");
+    els.dashboard.classList.remove("escondido");
 
-    const painelDiretor = document.getElementById("painel_diretor");
-    painelDiretor.style.display = "flex";
-    painelDiretor.classList.remove("escondido");
+    const tenant = obterTenantId() || "Tenant";
+    const utilizador = obterNomeUtilizador();
+    els.topbarUser.textContent = `Utilizador: ${utilizador}`;
+
+    setTenantInfo(tenant);
+    setThemeTenant(tenant);
+    preencherFiltrosMapa([]);
 
     await obterPosicoes();
-    atualizarKpisDiretor();
+    await atualizarKpisDiretor();
 
-    loopAtualizacao = setInterval(obterPosicoes, 2000);
-    if (!loopAtualizacaoKpis) {
-        loopAtualizacaoKpis = setInterval(atualizarKpisDiretor, 60000);
-    }
+    if (state.loopAtualizacao) clearInterval(state.loopAtualizacao);
+    state.loopAtualizacao = setInterval(obterPosicoes, 2000);
+
+    if (state.loopAtualizacaoKpis) clearInterval(state.loopAtualizacaoKpis);
+    state.loopAtualizacaoKpis = setInterval(atualizarKpisDiretor, 60000);
+}
+
+function setTenantInfo(tenant) {
+    state.tenant = tenant;
+    if (tenant) localStorage.setItem("tenant_id", tenant);
+    const iniciais = tenant
+        .split(/\s+/)
+        .filter(Boolean)
+        .slice(0, 2)
+        .map((p) => p[0]?.toUpperCase() || "")
+        .join("") || "M4";
+
+    els.tenantNameSidebar.textContent = tenant;
+    els.tenantAvatar.textContent = iniciais;
 }
 
 function fazerLogout() {
-    clearInterval(loopAtualizacao);
-    if (loopAtualizacaoKpis) {
-        clearInterval(loopAtualizacaoKpis);
-        loopAtualizacaoKpis = null;
-    }
+    clearInterval(state.loopAtualizacao);
+    clearInterval(state.loopAtualizacaoKpis);
+    state.loopAtualizacao = null;
+    state.loopAtualizacaoKpis = null;
+
     localStorage.removeItem("cracha_jwt");
     localStorage.removeItem("tenant_id");
     localStorage.removeItem("login_timestamp");
 
-    document.getElementById("seccao_dashboard").classList.add("escondido");
-    document.getElementById("painel_diretor").style.display = "none";
-    document.getElementById("painel_diretor").classList.add("escondido");
-    document.getElementById("seccao_login").classList.remove("escondido");
+    els.dashboard.classList.add("escondido");
+    els.login.classList.remove("escondido");
 }
-
-// restaura sessao apos refresh
-window.onload = function () {
-    if (obterToken()) mudarParaDashboard();
-};
-
-// dados em tempo real
 
 async function obterPosicoes() {
     const token = obterToken();
-    if (!token) { fazerLogout(); return; }
+    if (!token) {
+        fazerLogout();
+        return;
+    }
 
     try {
         const resposta = await fetch("/posicoes", {
-            headers: { "Authorization": "Bearer " + token },
+            headers: { Authorization: "Bearer " + token },
         });
 
-        if (resposta.ok) {
-            const pacoteDados = await resposta.json();
-            document.getElementById("nome_cliente").innerText = pacoteDados.cliente;
-            atualizarPainelBaterias(pacoteDados.dados);
-            atualizarPainelAlertas(pacoteDados.dados);
-
-            const caminhoCorreto = `/static/assets/mapa_${pacoteDados.cliente}.png`;
-            if (!imagemMapa.src.includes(caminhoCorreto)) {
-                imagemMapa.src = caminhoCorreto;
-                imagemMapa.onload = () => desenharFabrica(pacoteDados);
-            } else {
-                desenharFabrica(pacoteDados);
-            }
-        } else {
-            // Q-08: null-guard — #consola_dados não existe no HTML actual
-            const consola = document.getElementById("consola_dados");
-            if (consola) consola.innerText = "Erro de autenticação. Por favor, saia e entre de novo.";
-            fazerLogout();
+        if (resposta.status === 403) {
+            setOverlayState("Sem permissão para aceder a este tenant.");
+            return;
         }
-    } catch (erro) {
-        console.error("Erro ao comunicar com o servidor:", erro);
+
+        if (!resposta.ok) {
+            setOverlayState("Sem ligação aos dados em tempo real.");
+            els.estadoLigacao.textContent = "Ligação interrompida. A tentar novamente...";
+            return;
+        }
+
+        const pacoteDados = await resposta.json();
+        setOverlayState("");
+        els.estadoLigacao.textContent = `Ligado. Última atualização: ${new Date().toLocaleTimeString("pt-PT")}`;
+
+        if (pacoteDados.cliente) {
+            setTenantInfo(pacoteDados.cliente);
+            setThemeTenant(pacoteDados.cliente);
+        }
+
+        carregarMapaDoTenant(state.tenant);
+
+        state.dadosCompletos = normalizarAssets(pacoteDados.dados || []);
+        atualizarFiltrosDisponiveis(state.dadosCompletos);
+        state.dadosFiltrados = aplicarFiltros(state.dadosCompletos);
+
+        state.alertasCriticos = state.dadosCompletos.filter((a) => a.critico);
+        renderizarDropdownNotificacoes();
+
+        renderizarTabela(state.dadosFiltrados);
+        renderizarMetricas();
+        desenharFabrica(state.dadosFiltrados);
+        renderizarDetalhesSelecionados();
+        gerarToastsCriticos(state.dadosCompletos);
+    } catch {
+        setOverlayState("Sem ligação ao servidor.");
+        els.estadoLigacao.textContent = "Sem ligação ao servidor.";
     }
 }
 
-// kpis do painel do diretor
+function normalizarAssets(dados) {
+    return dados.map((tag) => {
+        const mapa = tag.mapa || tag.zone || tag.zona || "Mapa principal";
+        const nome = tag.nome || tag.name || tag.tag_id;
+        const ts = new Date(tag.timestamp);
+        const agora = new Date();
+        const online = (agora - ts) / 1000 <= TEMPO_OFFLINE_SEG;
+
+        return {
+            ...tag,
+            mapa,
+            nome,
+            online,
+            critico: tag.status !== null && tag.status !== "Normal",
+            bateria: tag.bateria ?? null,
+        };
+    });
+}
+
+function atualizarFiltrosDisponiveis(dados) {
+    const mapas = [...new Set(dados.map((a) => a.mapa))].sort();
+    preencherFiltrosMapa(mapas);
+}
+
+function preencherFiltrosMapa(mapas) {
+    const atual = els.filtroMapa.value;
+    const opcoes = ['<option value="">Todos</option>', ...mapas.map((v) => `<option value="${v}">${v}</option>`)];
+    els.filtroMapa.innerHTML = opcoes.join("");
+    if (atual && mapas.includes(atual)) els.filtroMapa.value = atual;
+}
+
+function aplicarFiltros(dados) {
+    const mapa = els.filtroMapa.value;
+    return dados.filter((asset) => (!mapa || asset.mapa === mapa));
+}
 
 async function atualizarKpisDiretor() {
-    const tenant = document.getElementById("nome_cliente")?.innerText?.trim();
+    const tenant = state.tenant || obterTenantId();
     const token = obterToken();
-    if (!tenant || !token) return;
-
-    const secao = document.getElementById("seccao_dashboard");
-    if (secao?.classList.contains("escondido")) return;
+    if (!tenant || !token || els.dashboard.classList.contains("escondido")) return;
 
     try {
         const resposta = await fetch(`/kpis/${encodeURIComponent(tenant)}`, {
-            headers: { "Authorization": "Bearer " + token },
+            headers: { Authorization: "Bearer " + token },
         });
         const dados = await resposta.json();
+        if (!dados.sucesso) return;
 
-        if (dados.sucesso) {
-            document.getElementById("kpi-distancia").innerText = dados.kpis.distancia_percorrida_metros + " m";
-            document.getElementById("kpi-utilizacao").innerText = dados.kpis.taxa_utilizacao_perc + " %";
-            document.getElementById("kpi-bateria").innerText = dados.kpis.bateria_media_frota_perc + " %";
-        }
-    } catch (erro) {
-        console.error("Erro ao carregar KPIs do painel:", erro);
+        const totalAssets = dados.kpis?.total_assets ?? state.dadosCompletos.length;
+        const ativosAgora = state.dadosCompletos.filter((a) => a.online).length;
+        const alertas = state.dadosCompletos.filter((a) => a.critico).length;
+
+        els.metricaTotal.textContent = String(totalAssets);
+        els.metricaAtivos.textContent = String(ativosAgora);
+        els.metricaAlertas.textContent = String(alertas);
+        els.metricasTopo.classList.add("loaded");
+    } catch {
+        renderizarMetricas();
     }
 }
 
-// motor grafico
+function renderizarMetricas() {
+    const total = state.dadosCompletos.length;
+    const ativos = state.dadosCompletos.filter((a) => a.online).length;
+    const alertas = state.dadosCompletos.filter((a) => a.critico).length;
 
-function desenharFabrica(pacoteDados) {
+    els.metricaTotal.textContent = String(total);
+    els.metricaAtivos.textContent = String(ativos);
+    els.metricaAlertas.textContent = String(alertas);
+    els.badgeNotificacoes.textContent = String(alertas);
+
+    els.metricasTopo.classList.add("loaded");
+}
+
+function setOverlayState(texto) {
+    if (!texto) {
+        els.mapOverlayState.classList.add("escondido");
+        els.mapOverlayState.textContent = "";
+        return;
+    }
+    els.mapOverlayState.classList.remove("escondido");
+    els.mapOverlayState.textContent = texto;
+}
+
+function desenharFabrica(assets) {
+    if (!ctx) return;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    if (imagemMapa.complete && imagemMapa.naturalWidth !== 0) {
-        ctx.drawImage(imagemMapa, 0, 0, canvas.width, canvas.height);
+    if (state.imagemMapa.complete && state.imagemMapa.naturalWidth > 0) {
+        ctx.drawImage(state.imagemMapa, 0, 0, canvas.width, canvas.height);
     }
 
-    // modo rasto
-    if (modoRastoAtivo) {
+    if (state.modoRastoAtivo) {
         ctx.fillStyle = "rgba(255, 0, 0, 0.15)";
-        historicoRasto.forEach(p => {
+        state.historicoRasto.forEach((p) => {
             ctx.beginPath();
             ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
             ctx.fill();
         });
     }
 
-    // filtro temporal para historico e tempo real
-    const sliderEl = document.getElementById("sliderTempo");
-    const sliderValor = sliderEl ? parseInt(sliderEl.value) : 480;
-    const minutosAtras = 480 - sliderValor;
+    const minutosAtras = obterMinutosAtras();
     const isHistorico = minutosAtras > 0;
-
     const agora = new Date();
     if (isHistorico) agora.setMinutes(agora.getMinutes() - minutosAtras);
 
-    const loginTs = localStorage.getItem("login_timestamp")
-        ? new Date(localStorage.getItem("login_timestamp"))
-        : null;
+    assets.forEach((tag) => {
+        const px = (tag.x * canvas.width) / LIMITE_X_CM;
+        const py = (tag.y * canvas.height) / LIMITE_Y_CM;
 
-    const tagsAtivas = pacoteDados.dados.filter(tag => {
-        if (isHistorico) return true;
-        const ultimaLeitura = new Date(tag.timestamp);
-        return !(loginTs && ultimaLeitura < loginTs);
-    });
-
-    // desenha cada tag no canvas
-    tagsAtivas.forEach(tag => {
-        const pixelX = (tag.x * canvas.width) / LIMITE_X_CM;
-        const pixelY = (tag.y * canvas.height) / LIMITE_Y_CM;
-
-        // limita o array de rasto para nao degradar performance
-        if (modoRastoAtivo) {
-            historicoRasto.push({ x: pixelX, y: pixelY });
-            if (historicoRasto.length > MAX_RASTO_PONTOS) {
-                historicoRasto.splice(0, historicoRasto.length - MAX_RASTO_PONTOS);
+        if (state.modoRastoAtivo) {
+            state.historicoRasto.push({ x: px, y: py });
+            if (state.historicoRasto.length > MAX_RASTO_PONTOS) {
+                state.historicoRasto.splice(0, state.historicoRasto.length - MAX_RASTO_PONTOS);
             }
         }
 
-        // desenha circulo de incerteza para sinal perdido
         const ultimaLeitura = new Date(tag.timestamp);
         const tempoSemSinalSegundos = (agora - ultimaLeitura) / 1000;
-
         if (tempoSemSinalSegundos > 10) {
             const raioIncerteza = Math.min(10 + tempoSemSinalSegundos * 0.5, 50);
             ctx.beginPath();
-            ctx.arc(pixelX, pixelY, raioIncerteza, 0, 2 * Math.PI);
+            ctx.arc(px, py, raioIncerteza, 0, 2 * Math.PI);
             ctx.fillStyle = "rgba(255, 165, 0, 0.3)";
             ctx.fill();
         }
 
-        // configura cor e tamanho mediante estado da tag
         let raioTag = 8;
         let corPreenchimento = "#007bff";
         let corBorda = "#ffffff";
 
-        if (tag.status !== null && tag.status !== "Normal") {
+        if (tag.critico) {
             raioTag = 12;
             corBorda = "#dc3545";
             const piscar = new Date().getMilliseconds() < 500;
@@ -229,132 +345,256 @@ function desenharFabrica(pacoteDados) {
         }
 
         ctx.beginPath();
-        ctx.arc(pixelX, pixelY, raioTag, 0, 2 * Math.PI);
+        ctx.arc(px, py, raioTag, 0, Math.PI * 2);
         ctx.fillStyle = corPreenchimento;
         ctx.fill();
         ctx.lineWidth = 2;
         ctx.strokeStyle = corBorda;
         ctx.stroke();
 
-        ctx.fillStyle = "#000000";
-        ctx.font = "12px Arial";
-        ctx.fillText(tag.tag_id, pixelX + 12, pixelY + 4);
+        ctx.fillStyle = "#0f172a";
+        ctx.font = "600 12px Inter";
+        ctx.fillText(tag.tag_id, px + 10, py + 4);
     });
 }
 
-// paineis laterais
+function renderizarTabela(dados) {
+    els.corpoTabela.innerHTML = "";
 
-function atualizarPainelBaterias(dadosTags) {
-    const lista = document.getElementById("lista_baterias");
-    const tags = dadosTags.filter(t => t.bateria !== null)
-        .sort((a, b) => a.bateria - b.bateria);
-
-    lista.innerHTML = "";
-    if (tags.length === 0) {
-        lista.innerHTML = '<li class="placeholder">Nenhuma tag online.</li>';
+    if (dados.length === 0) {
+        els.corpoTabela.innerHTML = '<tr><td colspan="6"><div class="state-card">Sem dados para os filtros selecionados.</div></td></tr>';
+        els.tabelaResumo.textContent = "Sem dados para apresentar.";
         return;
     }
 
-    tags.forEach(tag => {
-        const cor = tag.bateria <= 5 ? "red"
-            : tag.bateria <= 20 ? "#fd7e14"
-                : "#28a745";
-        const peso = tag.bateria <= 20 ? "bold" : "normal";
-        const li = document.createElement("li");
-        li.innerHTML = `Tag <strong>${tag.tag_id}</strong>: <span style="color:${cor};font-weight:${peso};">${tag.bateria}%</span>`;
-        lista.appendChild(li);
+    const rows = dados.map((asset) => {
+        const selected = state.selectedAssetId === asset.tag_id ? "selected-row" : "";
+        const estadoTxt = asset.online ? "Online" : "Sem sinal";
+        const dotClass = asset.online ? "live-dot" : "live-dot offline";
+        const bateria = asset.bateria === null ? "-" : `${asset.bateria}%`;
+        const ultima = new Date(asset.timestamp).toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+
+        return `
+            <tr class="${selected}" data-asset-id="${asset.tag_id}">
+                <td>${asset.tag_id}</td>
+                <td>${asset.nome}</td>
+                <td>${asset.mapa}</td>
+                <td><span class="live-status"><span class="${dotClass}"></span>${estadoTxt}</span></td>
+                <td>${bateria}</td>
+                <td>${ultima}</td>
+            </tr>
+        `;
     });
+
+    els.corpoTabela.innerHTML = rows.join("");
+    els.tabelaResumo.textContent = `${dados.length} assets apresentados.`;
 }
 
-function atualizarPainelAlertas(dadosTags) {
-    const lista = document.getElementById("lista_alertas");
-    const emPanico = dadosTags.filter(t => t.status !== null && t.status !== "Normal");
+function selecionarAsset(tagId) {
+    state.selectedAssetId = tagId;
+    renderizarTabela(state.dadosFiltrados);
+    renderizarDetalhesSelecionados();
+    desenharFabrica(state.dadosFiltrados);
+}
 
-    lista.innerHTML = "";
-    if (emPanico.length === 0) {
-        lista.innerHTML = '<li class="placeholder">Nenhum alerta ativo. Sistema normal.</li>';
+function renderizarDetalhesSelecionados() {
+    const asset = state.dadosFiltrados.find((a) => a.tag_id === state.selectedAssetId);
+    if (!asset) {
+        els.assetDetailBody.className = "asset-detail-body empty-state-card";
+        els.assetDetailBody.innerHTML = "<h3>Nenhum asset selecionado</h3><p>Selecione um ponto no mapa ou uma linha na tabela para abrir os detalhes operacionais.</p>";
         return;
     }
 
-    emPanico.forEach(tag => {
-        const li = document.createElement("li");
-        li.innerHTML = `🚨 <strong>EMERGÊNCIA:</strong> Tag <span style="color:#dc3545;font-weight:bold;">${tag.tag_id}</span> acionou o alarme!`;
-        lista.appendChild(li);
+    els.assetDetailBody.className = "asset-detail-body";
+    const bateria = asset.bateria === null ? "Sem leitura" : `${asset.bateria}%`;
+    const estado = asset.critico ? "Alerta crítico" : asset.online ? "Operacional" : "Sem sinal";
+
+    els.assetDetailBody.innerHTML = `
+        <h3>${asset.tag_id}</h3>
+        <p class="muted">Atualizado em ${new Date(asset.timestamp).toLocaleString("pt-PT")}</p>
+        <div class="detail-grid">
+            <div class="detail-item"><strong>Estado</strong><br>${estado}</div>
+            <div class="detail-item"><strong>Bateria</strong><br>${bateria}</div>
+            <div class="detail-item"><strong>Mapa</strong><br>${asset.mapa}</div>
+            <div class="detail-item"><strong>Nome</strong><br>${asset.nome}</div>
+            <div class="detail-item"><strong>Posição X</strong><br>${asset.x}</div>
+            <div class="detail-item"><strong>Posição Y</strong><br>${asset.y}</div>
+        </div>
+    `;
+}
+
+function gerarToastsCriticos(dados) {
+    const criticos = dados.filter((a) => a.critico);
+    criticos.forEach((asset) => {
+        const agora = Date.now();
+        const ultimo = state.ultimoToastPorTag.get(asset.tag_id) || 0;
+        if (agora - ultimo < 15000) return;
+
+        state.ultimoToastPorTag.set(asset.tag_id, agora);
+        criarToast(`Alerta crítico em ${asset.tag_id}. Verifique o estado imediatamente.`, true);
     });
 }
 
-// modo rasto e heatmap
+function criarToast(mensagem, critico = false) {
+    const toast = document.createElement("div");
+    toast.className = `toast${critico ? " critico" : ""}`;
+    toast.textContent = mensagem;
+    els.toastContainer.appendChild(toast);
 
-const checkRastoEl = document.getElementById("checkRasto");
-if (checkRastoEl) {
-    checkRastoEl.addEventListener("change", function () {
-        modoRastoAtivo = this.checked;
-        if (!modoRastoAtivo) {
-            historicoRasto = [];
-            if (imagemMapa.complete && imagemMapa.naturalWidth !== 0) {
-                ctx.clearRect(0, 0, canvas.width, canvas.height);
-                ctx.drawImage(imagemMapa, 0, 0, canvas.width, canvas.height);
-            }
-        }
-    });
+    setTimeout(() => {
+        toast.style.opacity = "0";
+        toast.style.transform = "translateY(-8px)";
+        setTimeout(() => toast.remove(), 180);
+    }, 4200);
 }
 
-// viagem no tempo digital twin
+function renderizarDropdownNotificacoes() {
+    if (state.alertasCriticos.length === 0) {
+        els.dropdownNotificacoes.innerHTML = '<p class="notificacao-vazia">Nenhum alerta crítico ativo.</p>';
+        return;
+    }
 
-const sliderTempo = document.getElementById("sliderTempo");
-const labelMinutos = document.getElementById("labelMinutos");
+    els.dropdownNotificacoes.innerHTML = state.alertasCriticos
+        .map((asset) => `<button class="notificacao-item" data-alerta-tag="${asset.tag_id}">Tag ${asset.tag_id} acionou alarme.</button>`)
+        .join("");
+}
 
-if (sliderTempo) {
-    sliderTempo.addEventListener("input", function () {
-        const valorSlider = parseInt(this.value);
-        const minutosAtras = 480 - valorSlider;
-        const divMapa = document.getElementById("wrapperMapa");
+function toggleDropdownNotificacoes(forcarFechar = false) {
+    if (forcarFechar) {
+        els.dropdownNotificacoes.classList.add("escondido");
+        els.btnNotificacoes.setAttribute("aria-expanded", "false");
+        return;
+    }
 
-        if (minutosAtras === 0) {
-            if (labelMinutos) {
-                labelMinutos.innerText = "Tempo Real";
-                labelMinutos.style.color = "#0d6efd";
-            }
-            divMapa?.classList.remove("piscar-vermelho");
+    const aberto = !els.dropdownNotificacoes.classList.contains("escondido");
+    els.dropdownNotificacoes.classList.toggle("escondido", aberto);
+    els.btnNotificacoes.setAttribute("aria-expanded", aberto ? "false" : "true");
+}
 
-            if (!loopAtualizacao) {
-                obterPosicoes();
-                loopAtualizacao = setInterval(obterPosicoes, 2000);
-            }
-        } else {
-            const horaHistorico = new Date();
-            horaHistorico.setMinutes(horaHistorico.getMinutes() - minutosAtras);
-            const horaFormatada = horaHistorico.toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" });
-
-            if (labelMinutos) {
-                labelMinutos.innerText = `Visualizando: ${horaFormatada}`;
-                labelMinutos.style.color = "#dc3545";
-            }
-            divMapa?.classList.add("piscar-vermelho");
-
-            if (loopAtualizacao) {
-                clearInterval(loopAtualizacao);
-                loopAtualizacao = null;
-            }
-            verPassado(minutosAtras);
-        }
-    });
+function obterMinutosAtras() {
+    return 480 - parseInt(els.sliderTempo.value, 10);
 }
 
 async function verPassado(minutos) {
     const token = obterToken();
-    if (!token) { fazerLogout(); return; }
+    if (!token) return;
+    const resp = await fetch(`/historico?minutos_atras=${minutos}`, {
+        headers: { Authorization: "Bearer " + token },
+    });
+    if (!resp.ok) return;
 
-    try {
-        const resposta = await fetch(`/historico?minutos_atras=${minutos}`, {
-            headers: { "Authorization": "Bearer " + token },
-        });
-        if (resposta.ok) {
-            desenharFabrica(await resposta.json());
-        } else {
-            console.error("Erro ao obter dados do histórico.");
-        }
-    } catch (erro) {
-        console.error("Erro na comunicação para histórico:", erro);
-    }
+    const pacote = await resp.json();
+    const dados = normalizarAssets(pacote.dados || []);
+    state.dadosCompletos = dados;
+    state.dadosFiltrados = aplicarFiltros(dados);
+    state.alertasCriticos = state.dadosCompletos.filter((a) => a.critico);
+    renderizarDropdownNotificacoes();
+    renderizarTabela(state.dadosFiltrados);
+    renderizarMetricas();
+    desenharFabrica(state.dadosFiltrados);
 }
+
+function configurarEventos() {
+    els.formLogin?.addEventListener("submit", fazerLogin);
+    document.getElementById("btnLogout")?.addEventListener("click", fazerLogout);
+    document.getElementById("btnAtualizar")?.addEventListener("click", obterPosicoes);
+
+    els.filtroMapa?.addEventListener("change", () => {
+        state.dadosFiltrados = aplicarFiltros(state.dadosCompletos);
+        renderizarTabela(state.dadosFiltrados);
+        desenharFabrica(state.dadosFiltrados);
+        renderizarDetalhesSelecionados();
+    });
+
+    els.corpoTabela?.addEventListener("click", (event) => {
+        const row = event.target.closest("tr[data-asset-id]");
+        if (!row) return;
+        selecionarAsset(row.dataset.assetId);
+    });
+
+    els.btnNotificacoes?.addEventListener("click", (event) => {
+        event.stopPropagation();
+        toggleDropdownNotificacoes();
+    });
+
+    els.dropdownNotificacoes?.addEventListener("click", (event) => {
+        const item = event.target.closest("[data-alerta-tag]");
+        if (!item) return;
+        selecionarAsset(item.dataset.alertaTag);
+        toggleDropdownNotificacoes(true);
+    });
+
+    document.addEventListener("click", (event) => {
+        if (!els.notificacoesWrap.contains(event.target)) {
+            toggleDropdownNotificacoes(true);
+        }
+    });
+
+    canvas?.addEventListener("click", (event) => {
+        const rect = canvas.getBoundingClientRect();
+        const x = ((event.clientX - rect.left) / rect.width) * canvas.width;
+        const y = ((event.clientY - rect.top) / rect.height) * canvas.height;
+
+        let candidato = null;
+        let melhorDist = Number.POSITIVE_INFINITY;
+
+        state.dadosFiltrados.forEach((asset) => {
+            const px = (asset.x * canvas.width) / LIMITE_X_CM;
+            const py = (asset.y * canvas.height) / LIMITE_Y_CM;
+            const dist = Math.hypot(px - x, py - y);
+            if (dist < melhorDist && dist < 20) {
+                melhorDist = dist;
+                candidato = asset;
+            }
+        });
+
+        if (candidato) selecionarAsset(candidato.tag_id);
+    });
+
+    els.checkRasto?.addEventListener("change", (event) => {
+        state.modoRastoAtivo = event.target.checked;
+        if (!state.modoRastoAtivo) state.historicoRasto = [];
+        desenharFabrica(state.dadosFiltrados);
+    });
+
+    els.sliderTempo?.addEventListener("input", async () => {
+        const minutosAtras = obterMinutosAtras();
+        if (minutosAtras === 0) {
+            els.labelMinutos.textContent = "Tempo real";
+            els.wrapperMapa.classList.remove("piscar-vermelho");
+            if (!state.loopAtualizacao) state.loopAtualizacao = setInterval(obterPosicoes, 2000);
+            await obterPosicoes();
+            return;
+        }
+
+        const ts = new Date();
+        ts.setMinutes(ts.getMinutes() - minutosAtras);
+        els.labelMinutos.textContent = `Visualização: ${ts.toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" })}`;
+        els.wrapperMapa.classList.add("piscar-vermelho");
+
+        if (state.loopAtualizacao) {
+            clearInterval(state.loopAtualizacao);
+            state.loopAtualizacao = null;
+        }
+        await verPassado(minutosAtras);
+    });
+}
+
+function carregarMapaDoTenant(tenant) {
+    const caminho = `/static/assets/mapa_${tenant}.png`;
+    if (!tenant || state.imagemMapa.src.includes(caminho)) return;
+    state.imagemMapa.src = caminho;
+    state.imagemMapa.onload = () => desenharFabrica(state.dadosFiltrados);
+}
+
+window.addEventListener("load", async () => {
+    configurarEventos();
+
+    const token = obterToken();
+    if (token) {
+        const tenant = obterTenantId();
+        if (tenant) carregarMapaDoTenant(tenant);
+        await mudarParaDashboard();
+    }
+});
+

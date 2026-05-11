@@ -1,15 +1,5 @@
-/**
- * relatorio.js
- * logica exclusiva da pagina relatorio.html com kpis por tag
- * depende de auth.js
- */
+﻿const instanciasGraficos = new Map();
 
-// mapa de instancias chartjs
-const instanciasGraficos = new Map();
-
-/**
- * cria ou actualiza grafico de barras
- */
 function criarOuAtualizarGrafico(canvasId, wrapperId, labels, valores, labelY, cor) {
     const canvasEl = document.getElementById(canvasId);
     const wrapperEl = document.getElementById(wrapperId);
@@ -19,8 +9,8 @@ function criarOuAtualizarGrafico(canvasId, wrapperId, labels, valores, labelY, c
     const larguraCanvas = Math.max(labels.length * LARGURA_POR_TAG, wrapperEl.clientWidth);
 
     canvasEl.width = larguraCanvas;
-    canvasEl.style.width = larguraCanvas + "px";
-    canvasEl.style.minWidth = larguraCanvas + "px";
+    canvasEl.style.width = `${larguraCanvas}px`;
+    canvasEl.style.minWidth = `${larguraCanvas}px`;
 
     if (instanciasGraficos.has(canvasId)) {
         const grafico = instanciasGraficos.get(canvasId);
@@ -46,6 +36,7 @@ function criarOuAtualizarGrafico(canvasId, wrapperId, labels, valores, labelY, c
         options: {
             responsive: true,
             maintainAspectRatio: false,
+            animation: { duration: 180 },
             plugins: { legend: { display: false } },
             scales: {
                 x: { title: { display: true, text: "Identificação da Tag", font: { size: 12 } } },
@@ -57,28 +48,51 @@ function criarOuAtualizarGrafico(canvasId, wrapperId, labels, valores, labelY, c
     instanciasGraficos.set(canvasId, novoGrafico);
 }
 
-/**
- * carrega kpis do tenant autenticado e desenha graficos
- */
-async function atualizarPainelDiretor() {
-    const tenant = obterTenantId();
+async function obterClienteDePosicoes() {
     const token = obterToken();
+    if (!token) return null;
 
-    if (!tenant || !token) {
+    try {
+        const respostaPosicoes = await fetch("/posicoes", {
+            headers: { Authorization: "Bearer " + token },
+        });
+        if (!respostaPosicoes.ok) return null;
+        const pacote = await respostaPosicoes.json();
+        return pacote.cliente || null;
+    } catch {
+        return null;
+    }
+}
+
+async function atualizarPainelDiretor() {
+    const tenantStorage = obterTenantId();
+    const tenantPosicoes = await obterClienteDePosicoes();
+    const token = obterToken();
+    const candidatos = [...new Set([tenantStorage, tenantPosicoes].filter(Boolean))];
+
+    if (candidatos.length === 0 || !token) {
         window.location.href = "/";
         return;
     }
 
     try {
-        const resposta = await fetch(`/kpis/${encodeURIComponent(tenant)}`, {
-            headers: { "Authorization": "Bearer " + token },
-        });
-        const dados = await resposta.json();
-
-        if (!dados.sucesso) {
-            console.error("Erro ao carregar KPIs:", dados.erro);
-            return;
+        let dados = null;
+        for (const tenant of candidatos) {
+            const resposta = await fetch(`/kpis/${encodeURIComponent(tenant)}`, {
+                headers: { Authorization: "Bearer " + token },
+            });
+            if (!resposta.ok) continue;
+            const tentativa = await resposta.json();
+            if (tentativa?.sucesso) {
+                dados = tentativa;
+                break;
+            }
         }
+        if (!dados) return;
+
+        document.getElementById("kpi-distancia").innerText = `${dados.kpis.distancia_percorrida_metros} m`;
+        document.getElementById("kpi-utilizacao").innerText = `${dados.kpis.taxa_utilizacao_perc} %`;
+        document.getElementById("kpi-bateria").innerText = `${dados.kpis.bateria_media_frota_perc} %`;
 
         const etiquetasTags = Object.keys(dados.grafico_distancias).sort();
 
@@ -89,17 +103,16 @@ async function atualizarPainelDiretor() {
         ];
 
         configGraficos.forEach(({ canvasId, wrapperId, dataMap, labelY, cor }) => {
-            const valores = etiquetasTags.map(tag => dataMap[tag] ?? 0);
+            const valores = etiquetasTags.map((tag) => dataMap[tag] ?? 0);
             criarOuAtualizarGrafico(canvasId, wrapperId, etiquetasTags, valores, labelY, cor);
         });
-
     } catch (erro) {
-        console.error("Erro ao carregar o Painel do Diretor:", erro);
+        console.error("Erro ao carregar o painel de diretor:", erro);
     }
 }
 
-// inicializacao
 window.onload = function () {
     redirecionarSeNaoAutenticado();
     atualizarPainelDiretor();
 };
+

@@ -1,41 +1,67 @@
-<!DOCTYPE html>
-<html lang="pt">
+﻿<!DOCTYPE html>
+<html lang="pt-PT">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Relatório de KPIs - Metric4</title>
-    <link rel="stylesheet" href="/static/style.css?v=1.3">
+    <title>Relatórios de KPI - Metric4</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css?v=3.1">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
-    <div class="relatorio-container">
-        <button class="btn-voltar" onclick="window.location.href='/'">← Voltar ao Mapa</button>
+    <main class="page-shell">
+        <header class="page-top">
+            <div class="auditoria-header">
+                <img src="/static/assets/metric-logo.svg" alt="Metric4" class="metric-logo page-logo">
+                <div>
+                    <h1>Relatórios de KPI por Tag</h1>
+                    <p class="muted">Visão consolidada de frota e detalhe por asset.</p>
+                </div>
+            </div>
+            <button class="btn btn-secondary" onclick="window.location.href='/'">Voltar ao mapa</button>
+        </header>
 
-        <!-- Gráfico 1: Distância Percorrida -->
-        <div class="grafico-container">
+        <section class="frota-kpis" id="kpisFrotaSection">
+            <article class="metric-card">
+                <p>Distância Total (Frota)</p>
+                <strong id="kpi-distancia">0 m</strong>
+            </article>
+            <article class="metric-card">
+                <p>OEE Frota (Utilização)</p>
+                <strong id="kpi-utilizacao">0 %</strong>
+            </article>
+            <article class="metric-card">
+                <p>Saúde Baterias (Média)</p>
+                <strong id="kpi-bateria">0 %</strong>
+            </article>
+        </section>
+
+        <section class="grafico-container">
             <h2>Distância Percorrida por Tag (m)</h2>
             <div class="chart-wrapper" id="wrapperDistancias">
                 <canvas id="graficoDistancias"></canvas>
             </div>
-        </div>
+        </section>
 
-        <!-- Gráfico 2: Taxa de Utilização (OEE proxy) -->
-        <div class="grafico-container">
+        <section class="grafico-container">
             <h2>Taxa de Utilização por Tag (%)</h2>
             <div class="chart-wrapper" id="wrapperUtilizacao">
                 <canvas id="graficoUtilizacao"></canvas>
             </div>
-        </div>
+        </section>
 
-        <!-- Gráfico 3: Nível de Bateria -->
-        <div class="grafico-container">
+        <section class="grafico-container">
             <h2>Nível de Bateria por Tag (%)</h2>
             <div class="chart-wrapper" id="wrapperBateria">
                 <canvas id="graficoBateria"></canvas>
             </div>
-        </div>
-    </div>
+        </section>
+    </main>
+
     <script src="/static/auth.js"></script>
-    <script src="/static/relatorio.js"></script>
+    <script src="/static/relatorio.js?v=3.1"></script>
 </body>
 </html>
+
