@@ -5,8 +5,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Metric4 - Monitorização Industrial</title>
-    <link rel="stylesheet" href="/static/style.css?v=1.2">
+    <link rel="stylesheet" href="/static/style.css?v=1.3">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
 </head>
 
 <body>
@@ -33,8 +34,19 @@
             <p id="kpi-bateria">0 %</p>
         </div>
 
-        <button class="btn-relatorio" onclick="window.location.href='relatorio.html'">Ver Distância por Tag</button>
+        <button class="btn-relatorio" onclick="window.location.href='relatorio.html'">KPIs por Tag</button>
+        <button class="btn-auditoria" onclick="window.location.href='auditoria.html'">Auditoria</button>
+
+        <div style="margin: 10px; padding: 10px; background: #f8f9fa; border-radius: 8px; border: 1px solid #ddd;">
+            <label class="switch">
+                <input type="checkbox" id="checkRasto">
+                <span class="slider"></span>
+            </label>
+            <span style="font-weight: bold; margin-left: 10px;">Ativar Modo Rasto (Heatmap)</span>
+        </div>
+
     </div>
+
 
     <div id="seccao_dashboard" class="escondido">
         <h2>Painel de Controlo - <span id="nome_cliente"></span></h2>
@@ -45,8 +57,24 @@
 
             <div class="mapa-container">
                 <h3>Planta da Fábrica (Monitorização Ativa):</h3>
-                <div style="position: relative; display: inline-block; border: 2px solid #ccc; background: white;">
+                <div id="wrapperMapa"
+                    style="position: relative; display: inline-block; background: white; border: 2px solid #ccc;">
                     <canvas id="mapaFabrica" width="800" height="600"></canvas>
+                </div>
+
+                <div id="controlo-historico"
+                    style="background: #e9ecef; padding: 15px; border-radius: 10px; margin-top: 10px;">
+                    <label for="sliderTempo"
+                        style="font-weight: bold; display: flex; justify-content: space-between; margin-bottom: 5px;">
+                        <span>Recuar no Tempo</span>
+                        <span id="labelMinutos" style="color: #0d6efd;">Tempo Real</span>
+                    </label>
+                    <input type="range" id="sliderTempo" min="0" max="480" value="480" step="1" style="width: 100%;">
+                    <div
+                        style="display: flex; justify-content: space-between; font-size: 11px; color: #6c757d; margin-top: 5px;">
+                        <span>Há 8 horas</span>
+                        <span>Agora</span>
+                    </div>
                 </div>
             </div>
 
@@ -71,7 +99,8 @@
         </div>
     </div>
 
-    <script src="/static/app.js"></script>
+    <script src="/static/auth.js"></script>
+    <script src="/static/app.js?v=4.0"></script>
 </body>
 
 </html>
