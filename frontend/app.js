@@ -1,6 +1,4 @@
 const cfg = window.RUNTIME_CONFIG || {};
-const LIMITE_X_CM = cfg.map?.limiteXcm ?? 760;
-const LIMITE_Y_CM = cfg.map?.limiteYcm ?? 500;
 const MAX_RASTO_PONTOS = cfg.map?.maxRastoPontos ?? 5000;
 const TEMPO_OFFLINE_SEG = cfg.timing?.tempoOfflineSeg ?? 10;
 
@@ -16,9 +14,11 @@ const state = {
     dadosFiltrados: [],
     dadosCompletos: [],
     tenant: "",
-    selectedAssetId: null,
     ultimoToastPorTag: new Map(),
     alertasCriticos: [],
+    totalAssetsSql: 0,
+    mapasDisponiveis: [],
+    mapaAtivo: null,
 };
 
 const els = {
@@ -61,6 +61,10 @@ function obterNomeUtilizador() {
     }
 }
 
+function isAdminToken() {
+    return localStorage.getItem("is_admin") === "true";
+}
+
 function setThemeTenant(tenant) {
     const tenantId = String(tenant || "").toLowerCase();
     const temas = cfg.tenantTheme?.byTenantId || {};
@@ -94,9 +98,17 @@ async function fazerLogin(event) {
         const dados = await resposta.json();
         localStorage.setItem("cracha_jwt", dados.access_token);
         localStorage.setItem("tenant_id", dados.tenant_id);
+        localStorage.setItem("tenant_nome", dados.tenant_nome || dados.tenant_id);
+        localStorage.setItem("is_admin", dados.is_admin ? "true" : "false");
         localStorage.setItem("login_timestamp", new Date().toISOString());
 
         els.msgErro.textContent = "";
+
+        if (dados.is_admin) {
+            window.location.href = "/admin.html";
+            return;
+        }
+        
         await mudarParaDashboard();
     } catch {
         els.msgErro.textContent = "Não foi possível contactar o servidor.";
@@ -117,7 +129,8 @@ async function mudarParaDashboard() {
 
     setTenantInfo(tenant);
     setThemeTenant(tenant);
-    preencherFiltrosMapa([]);
+    
+    await carregarMapasDoServidor();
 
     await obterPosicoes();
     await atualizarKpisDiretor();
@@ -131,18 +144,28 @@ async function mudarParaDashboard() {
 
 function setTenantInfo(tenant) {
     state.tenant = tenant;
-    const iniciais = tenant
+    const tenantNome = localStorage.getItem("tenant_nome") || tenant;
+    const iniciais = tenantNome
+        .replace(/_/g, " ")
         .split(/\s+/)
         .filter(Boolean)
         .slice(0, 2)
         .map((p) => p[0]?.toUpperCase() || "")
         .join("") || "M4";
 
-    els.tenantNameSidebar.textContent = tenant;
+    els.tenantNameSidebar.textContent = tenantNome;
     els.tenantAvatar.textContent = iniciais;
 }
 
 function fazerLogout() {
+    const token = obterToken();
+    if (token) {
+        fetch('/logout', {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${token}` },
+        }).catch(() => {});
+    }
+
     clearInterval(state.loopAtualizacao);
     clearInterval(state.loopAtualizacaoKpis);
     state.loopAtualizacao = null;
@@ -150,6 +173,8 @@ function fazerLogout() {
 
     localStorage.removeItem("cracha_jwt");
     localStorage.removeItem("tenant_id");
+    localStorage.removeItem("tenant_nome");
+    localStorage.removeItem("is_admin");
     localStorage.removeItem("login_timestamp");
 
     els.dashboard.classList.add("escondido");
@@ -192,11 +217,14 @@ async function obterPosicoes() {
             return;
         }
 
-        carregarMapaDoTenant(state.tenant);
+
+
+        if (pacoteDados.total_tags_sql !== undefined) {
+            state.totalAssetsSql = pacoteDados.total_tags_sql;
+        }
 
         const normalizados = normalizarAssets(pacoteDados.dados || []);
         state.dadosCompletos = filtrarDadosSessaoTempoReal(normalizados);
-        atualizarFiltrosDisponiveis(state.dadosCompletos);
         state.dadosFiltrados = aplicarFiltros(state.dadosCompletos);
 
         state.alertasCriticos = state.dadosCompletos.filter((a) => a.critico);
@@ -215,7 +243,7 @@ async function obterPosicoes() {
 
 function normalizarAssets(dados) {
     return dados.map((tag) => {
-        const mapa = tag.mapa || tag.zone || tag.zona || "Mapa principal";
+        const mapaOriginal = tag.mapa || tag.zone || tag.zona || null;
         const nome = tag.nome || tag.name || tag.tag_id;
         const ts = new Date(tag.timestamp);
         const agora = new Date();
@@ -223,7 +251,7 @@ function normalizarAssets(dados) {
 
         return {
             ...tag,
-            mapa,
+            mapaOriginal,
             nome,
             online,
             critico: tag.status !== null && tag.status !== "Normal",
@@ -233,32 +261,39 @@ function normalizarAssets(dados) {
 }
 
 function filtrarDadosSessaoTempoReal(dados) {
-    const minutosAtras = obterMinutosAtras();
-    if (minutosAtras > 0) return dados;
-
-    const loginTsRaw = localStorage.getItem("login_timestamp");
-    if (!loginTsRaw) return dados;
-
-    const loginTs = new Date(loginTsRaw);
-    if (Number.isNaN(loginTs.getTime())) return dados;
-    return dados.filter((asset) => new Date(asset.timestamp) >= loginTs);
+    // Mostra todos os assets recebidos, independentemente da hora de login.
+    // Os assets offline ficam visiveis na tabela mas marcados como "Sem sinal".
+    return dados;
 }
 
-function atualizarFiltrosDisponiveis(dados) {
-    const mapas = [...new Set(dados.map((a) => a.mapa))].sort();
-    preencherFiltrosMapa(mapas);
-}
-
-function preencherFiltrosMapa(mapas) {
-    const atual = els.filtroMapa.value;
-    const opcoes = ['<option value="">Todos</option>', ...mapas.map((v) => `<option value="${v}">${v}</option>`)];
-    els.filtroMapa.innerHTML = opcoes.join("");
-    if (atual && mapas.includes(atual)) els.filtroMapa.value = atual;
+async function carregarMapasDoServidor() {
+    const token = obterToken();
+    if (!token) return;
+    try {
+        const resp = await fetch("/api/mapas", { headers: { Authorization: "Bearer " + token } });
+        if (!resp.ok) return;
+        state.mapasDisponiveis = await resp.json();
+        
+        const opcoes = state.mapasDisponiveis.map(m => `<option value="${m.id}">${m.nome}</option>`);
+        if (opcoes.length === 0) {
+            els.filtroMapa.innerHTML = '<option value="">Sem Mapas</option>';
+            state.mapaAtivo = null;
+        } else {
+            els.filtroMapa.innerHTML = opcoes.join("");
+            state.mapaAtivo = state.mapasDisponiveis[0];
+        }
+        carregarImagemDoMapaAtivo();
+    } catch (e) {
+        console.error("Erro ao carregar mapas", e);
+    }
 }
 
 function aplicarFiltros(dados) {
-    const mapa = els.filtroMapa.value;
-    return dados.filter((asset) => (!mapa || asset.mapa === mapa));
+    if (!state.mapaAtivo) return dados;
+    return dados.filter((asset) => !asset.mapaOriginal || asset.mapaOriginal === state.mapaAtivo.nome).map(asset => ({
+        ...asset,
+        mapa: asset.mapaOriginal || state.mapaAtivo.nome
+    }));
 }
 
 async function atualizarKpisDiretor() {
@@ -272,11 +307,12 @@ async function atualizarKpisDiretor() {
         const dados = await resposta.json();
         if (!dados.sucesso) return;
 
-        const totalAssets = dados.kpis?.total_assets ?? state.dadosCompletos.length;
         const ativosAgora = state.dadosCompletos.filter((a) => a.online).length;
         const alertas = state.dadosCompletos.filter((a) => a.critico).length;
 
-        els.metricaTotal.textContent = String(totalAssets);
+        state.totalAssetsSql = dados.kpis?.total_assets ?? state.totalAssetsSql;
+
+        els.metricaTotal.textContent = String(state.totalAssetsSql);
         els.metricaAtivos.textContent = String(ativosAgora);
         els.metricaAlertas.textContent = String(alertas);
         els.metricasTopo.classList.add("loaded");
@@ -286,11 +322,10 @@ async function atualizarKpisDiretor() {
 }
 
 function renderizarMetricas() {
-    const total = state.dadosCompletos.length;
     const ativos = state.dadosCompletos.filter((a) => a.online).length;
     const alertas = state.dadosCompletos.filter((a) => a.critico).length;
 
-    els.metricaTotal.textContent = String(total);
+    els.metricaTotal.textContent = String(state.totalAssetsSql || state.dadosCompletos.length);
     els.metricaAtivos.textContent = String(ativos);
     els.metricaAlertas.textContent = String(alertas);
     els.badgeNotificacoes.textContent = String(alertas);
@@ -311,6 +346,10 @@ function setOverlayState(texto) {
 function desenharFabrica(assets) {
     if (!ctx) return;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (!state.mapaAtivo) {
+        setOverlayState("Nenhum mapa associado ao tenant. Configure um mapa no admin para ver a representação.");
+        return;
+    }
 
     if (state.imagemMapa.complete && state.imagemMapa.naturalWidth > 0) {
         ctx.drawImage(state.imagemMapa, 0, 0, canvas.width, canvas.height);
@@ -330,9 +369,16 @@ function desenharFabrica(assets) {
     const agora = new Date();
     if (isHistorico) agora.setMinutes(agora.getMinutes() - minutosAtras);
 
+    const limiteX = Number(state.mapaAtivo.limite_x);
+    const limiteY = Number(state.mapaAtivo.limite_y);
+    if (!limiteX || !limiteY) {
+        setOverlayState("Mapa configurado sem limites válidos.");
+        return;
+    }
+
     assets.forEach((tag) => {
-        const px = (tag.x * canvas.width) / LIMITE_X_CM;
-        const py = (tag.y * canvas.height) / LIMITE_Y_CM;
+        const px = (tag.x * canvas.width) / limiteX;
+        const py = (tag.y * canvas.height) / limiteY;
 
         if (state.modoRastoAtivo) {
             state.historicoRasto.push({ x: px, y: py });
@@ -375,7 +421,7 @@ function desenharFabrica(assets) {
 
         ctx.fillStyle = "#0f172a";
         ctx.font = "600 12px Inter";
-        ctx.fillText(tag.tag_id, px + 10, py + 4);
+        ctx.fillText(tag.nome || tag.tag_id, px + 10, py + 4);
     });
 }
 
@@ -520,7 +566,72 @@ function configurarEventos() {
     document.getElementById("btnLogout")?.addEventListener("click", fazerLogout);
     document.getElementById("btnAtualizar")?.addEventListener("click", obterPosicoes);
 
+    document.getElementById("btnContaSettings")?.addEventListener("click", () => {
+        const m = document.getElementById("modalContaSettings");
+        if (!m) return;
+        document.getElementById("settingsNewUsername").value = "";
+        document.getElementById("settingsNewPassword").value = "";
+        document.getElementById("settingsCurrentPassword").value = "";
+        document.getElementById("settingsErro").textContent = "";
+        m.style.display = "flex";
+    });
+
+    function fecharContaModal() {
+        const m = document.getElementById("modalContaSettings");
+        if (m) m.style.display = "none";
+    }
+    document.getElementById("btnFecharContaModal")?.addEventListener("click", fecharContaModal);
+    document.getElementById("btnCancelarContaModal")?.addEventListener("click", fecharContaModal);
+    document.getElementById("modalContaSettings")?.addEventListener("click", (e) => {
+        if (e.target === e.currentTarget) fecharContaModal();
+    });
+
+    document.getElementById("formContaSettings")?.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const token = obterToken();
+        const erroEl = document.getElementById("settingsErro");
+        erroEl.textContent = "";
+
+        const body = {
+            current_password: document.getElementById("settingsCurrentPassword").value,
+        };
+        const newUser = document.getElementById("settingsNewUsername").value.trim();
+        const newPass = document.getElementById("settingsNewPassword").value;
+        if (newUser) body.new_username = newUser;
+        if (newPass) body.new_password = newPass;
+
+        if (!body.new_username && !body.new_password) {
+            erroEl.textContent = "Indica pelo menos um campo a alterar.";
+            return;
+        }
+
+        try {
+            const resp = await fetch("/api/user/credentials", {
+                method: "PUT",
+                headers: { "Content-Type": "application/json", "Authorization": "Bearer " + token },
+                body: JSON.stringify(body)
+            });
+            const dados = await resp.json();
+            if (!resp.ok) {
+                erroEl.textContent = dados.detail || "Erro ao gravar.";
+                return;
+            }
+            fecharContaModal();
+            if (dados.username_changed) {
+                alert("Username alterado. Serás redireccionado para o login.");
+                fazerLogout();
+            } else {
+                criarToast("Password atualizada com sucesso!");
+            }
+        } catch {
+            erroEl.textContent = "Não foi possível contactar o servidor.";
+        }
+    });
+
     els.filtroMapa?.addEventListener("change", () => {
+        const mapId = parseInt(els.filtroMapa.value, 10);
+        state.mapaAtivo = state.mapasDisponiveis.find(m => m.id === mapId) || null;
+        carregarImagemDoMapaAtivo();
         state.dadosFiltrados = aplicarFiltros(state.dadosCompletos);
         renderizarTabela(state.dadosFiltrados);
         desenharFabrica(state.dadosFiltrados);
@@ -601,11 +712,25 @@ function configurarEventos() {
     });
 }
 
-function carregarMapaDoTenant(tenant) {
-    const caminho = `/static/assets/mapa_${encodeURIComponent(tenant)}.png`;
-    if (!tenant || state.imagemMapa.src.includes(caminho)) return;
-    state.imagemMapa.src = caminho;
+function carregarImagemDoMapaAtivo() {
+    if (!state.mapaAtivo || !state.mapaAtivo.path) {
+        state.imagemMapa.src = "";
+        desenharFabrica(state.dadosFiltrados);
+        return;
+    }
+    
+    let caminho = state.mapaAtivo.path;
+    if (caminho.startsWith('frontend/')) {
+        caminho = caminho.replace('frontend/', '/static/');
+    } else if (!caminho.startsWith('/')) {
+        caminho = '/' + caminho;
+    }
+
+    if (state.imagemMapa.src.includes(caminho)) return;
+    
     state.imagemMapa.onload = () => desenharFabrica(state.dadosFiltrados);
+    state.imagemMapa.onerror = () => console.error("Falha ao carregar a imagem do mapa:", caminho);
+    state.imagemMapa.src = caminho;
 }
 
 window.addEventListener("load", async () => {
@@ -613,8 +738,11 @@ window.addEventListener("load", async () => {
 
     const token = obterToken();
     if (token) {
-        const tenant = obterTenantId();
-        if (tenant) carregarMapaDoTenant(tenant);
+        if (isAdminToken()) {
+            window.location.href = "/admin.html";
+            return;
+        }
+
         await mudarParaDashboard();
     }
 });

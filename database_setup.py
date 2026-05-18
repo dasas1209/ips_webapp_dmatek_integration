@@ -9,6 +9,7 @@ import sqlite3
 from pathlib import Path
 
 from services.database import get_db_connection
+from config import ADMIN_TENANT_ID, ADMIN_USERNAME, ADMIN_PASSWORD
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger("metric4.db_setup")
@@ -19,6 +20,7 @@ DB_PATH  = BASE_DIR / "metric4rtls_system.db"
 
 # csvs de origem — apagados apos seeding bem-sucedido
 CSV_CLIENTES  = BASE_DIR / "matriz_clientes.csv"
+CSV_MAPAS     = BASE_DIR / "matriz_mapas.csv"
 CSV_USUARIOS  = BASE_DIR / "utilizadores_placeholder.csv"
 
 
@@ -130,35 +132,47 @@ def _seed_clientes_e_tags(conn: sqlite3.Connection) -> None:
 
 
 def _seed_mapas(conn: sqlite3.Connection) -> None:
-    """popula mapas — cliente_A tem imagem real; B e C ficam sem imagem por agora"""
+    """popula mapas a partir de um CSV externo para evitar sementes fixas."""
 
-    # limites fisicos do cliente_A (extraidos do config actual)
-    # nao importamos config para evitar dependencia circular no setup
-    LIMITE_X_CLIENTE_A = 760.0
-    LIMITE_Y_CLIENTE_A = 500.0
+    if not CSV_MAPAS.exists():
+        logger.warning("csv matriz_mapas.csv nao encontrado — sem mapas seeded.")
+        return
 
-    mapas_iniciais = [
-        ("Planta Cliente A", LIMITE_X_CLIENTE_A, LIMITE_Y_CLIENTE_A,
-         "frontend/assets/mapa_cliente_A.png", "cliente_A"),
-        ("Planta Cliente B", 600.0, 400.0, None, "cliente_B"),
-        ("Planta Cliente C", 600.0, 400.0, None, "cliente_C"),
-    ]
+    count = 0
+    with open(CSV_MAPAS, encoding="utf-8") as fh:
+        reader = csv.DictReader(fh, delimiter=";")
+        for linha in reader:
+            nome = linha.get("nome", "").strip()
+            limite_x = linha.get("limite_x", "").strip()
+            limite_y = linha.get("limite_y", "").strip()
+            ficheiro = linha.get("ficheiro_img", "").strip() or None
+            cliente_id = linha.get("cliente_id", "").strip()
 
-    for nome, lx, ly, img, cid in mapas_iniciais:
-        # so insere se o cliente existir na bd
-        existe = conn.execute(
-            "SELECT 1 FROM clientes WHERE id = ?", (cid,)
-        ).fetchone()
-        if not existe:
-            continue
-        conn.execute(
-            """INSERT OR IGNORE INTO mapas (nome, limite_x, limite_y, ficheiro_img, cliente_id)
-               VALUES (?, ?, ?, ?, ?)""",
-            (nome, lx, ly, img, cid),
-        )
+            if not nome or not limite_x or not limite_y or not cliente_id:
+                continue
+
+            try:
+                lx = float(limite_x)
+                ly = float(limite_y)
+            except ValueError:
+                logger.warning("linha de mapa invalida ignorada: %s", linha)
+                continue
+
+            existe = conn.execute(
+                "SELECT 1 FROM clientes WHERE id = ?", (cliente_id,)
+            ).fetchone()
+            if not existe:
+                logger.warning("cliente de mapa nao encontrado, ignorando: %s", cliente_id)
+                continue
+
+            conn.execute(
+                "INSERT OR IGNORE INTO mapas (nome, limite_x, limite_y, ficheiro_img, cliente_id) VALUES (?, ?, ?, ?, ?)",
+                (nome, lx, ly, ficheiro, cliente_id),
+            )
+            count += 1
 
     conn.commit()
-    logger.info("mapas seeded.")
+    logger.info("mapas seeded: %s", count)
 
 
 def _seed_usuarios(conn: sqlite3.Connection) -> None:
@@ -207,21 +221,22 @@ def seed_from_csvs(conn: sqlite3.Connection) -> None:
 
 def ensure_admin(conn: sqlite3.Connection) -> None:
     """
-    garante que existe um cliente 'cliente_admin' e um user 'admin'.
+    garante que existe um cliente admin e um user administrador configurado por ambiente.
     idempotente — nao duplica se ja existir.
     """
     conn.execute(
-        "INSERT OR IGNORE INTO clientes (id, nome) VALUES ('cliente_admin', 'Administrador')"
+        "INSERT OR IGNORE INTO clientes (id, nome) VALUES (?, ?)",
+        (ADMIN_TENANT_ID, "Administrador"),
     )
     conn.execute(
-        """INSERT OR IGNORE INTO users (username, password, cliente_id)
-           VALUES ('admin', 'admin', 'cliente_admin')"""
+        "INSERT OR IGNORE INTO users (username, password, cliente_id) VALUES (?, ?, ?)",
+        (ADMIN_USERNAME, ADMIN_PASSWORD, ADMIN_TENANT_ID),
     )
     conn.commit()
 
     # log diferenciado: admin criado ou ja existia
     admin = conn.execute(
-        "SELECT id FROM users WHERE username = 'admin'"
+        "SELECT id FROM users WHERE username = ?", (ADMIN_USERNAME,)
     ).fetchone()
     if admin:
         logger.info("utilizador admin verificado (id=%s).", admin["id"])
@@ -233,7 +248,7 @@ def ensure_admin(conn: sqlite3.Connection) -> None:
 
 def delete_csvs() -> None:
     """apaga os csvs de origem apos seeding — os dados vivem na bd a partir de agora"""
-    for csv_path in (CSV_CLIENTES, CSV_USUARIOS):
+    for csv_path in (CSV_CLIENTES, CSV_MAPAS, CSV_USUARIOS):
         if csv_path.exists():
             csv_path.unlink()
             logger.info("csv apagado: %s", csv_path.name)

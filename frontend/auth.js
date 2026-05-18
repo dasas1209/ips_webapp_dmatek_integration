@@ -30,6 +30,7 @@ function obterToken() {
     if (tokenExpirado()) {
         localStorage.removeItem("cracha_jwt");
         localStorage.removeItem("tenant_id");
+        localStorage.removeItem("is_admin");
         return null;
     }
     return localStorage.getItem("cracha_jwt");
@@ -55,6 +56,14 @@ function obterTenantId() {
     } catch {
         return null;
     }
+}
+
+/**
+ * verifica se o utilizador autenticado e o administrador do sistema
+ * @returns {boolean}
+ */
+function isPainelAdmin() {
+    return localStorage.getItem("is_admin") === "true";
 }
 
 /**

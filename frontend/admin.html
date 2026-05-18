@@ -1,0 +1,1020 @@
+<!DOCTYPE html>
+<html lang="pt">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Administração — Metric4 RTLS</title>
+    <!-- Bootstrap 5 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- FontAwesome for icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
+    <style>
+        body {
+            background-color: #f8f9fa;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        .navbar {
+            background-color: #1e293b !important;
+        }
+
+        .navbar-brand {
+            font-weight: 600;
+            letter-spacing: 0.5px;
+        }
+
+        .card {
+            border: none;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            margin-bottom: 1.5rem;
+        }
+
+        .card-header {
+            background-color: #fff;
+            border-bottom: 1px solid #e2e8f0;
+            border-radius: 10px 10px 0 0 !important;
+            padding: 1rem 1.5rem;
+            font-weight: 600;
+            color: #334155;
+        }
+
+        .table th {
+            font-weight: 600;
+            color: #475569;
+            background-color: #f8fafc;
+        }
+
+        .toast-container {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 1055;
+        }
+
+        .list-group-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+    </style>
+</head>
+
+<body>
+
+    <!-- Navbar -->
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+        <div class="container">
+            <a class="navbar-brand" href="#">
+                <i class="fa-solid fa-gear me-2"></i> Metric4 RTLS | Painel de Gestão
+            </a>
+            <div class="d-flex">
+                <button id="btnAdminLogout" class="btn btn-outline-light btn-sm"><i
+                        class="fa-solid fa-arrow-right-from-bracket me-1"></i> Terminar Sessão</button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <div class="container mt-4">
+        <div class="row mb-4">
+            <div class="col-md-8 offset-md-2">
+                <div class="card">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-end mb-2">
+                            <label for="tenantSelect" class="form-label fw-bold mb-0"><i
+                                    class="fa-solid fa-building me-1"></i> Selecionar Cliente (Tenant)</label>
+                            <button class="btn btn-sm btn-success" data-bs-toggle="modal"
+                                data-bs-target="#modalCreateTenant"><i class="fa-solid fa-plus me-1"></i> Novo
+                                Cliente</button>
+                        </div>
+                        <div class="input-group input-group-lg">
+                            <select class="form-select" id="tenantSelect">
+                                <option value="" selected disabled>A carregar clientes...</option>
+                            </select>
+                            <button class="btn btn-outline-primary d-none" id="btnEditTenant" data-bs-toggle="modal"
+                                data-bs-target="#modalEditTenant" title="Editar Nome do Cliente"><i
+                                    class="fa-solid fa-pen"></i></button>
+                            <button class="btn btn-outline-danger d-none" id="btnDeleteTenant" data-bs-toggle="modal"
+                                data-bs-target="#modalDeleteTenant" title="Apagar Cliente"><i
+                                    class="fa-solid fa-trash"></i></button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="configSection" class="d-none">
+            <div class="row">
+                <!-- Mapa & Users Config -->
+                <div class="col-lg-5">
+                    <!-- Mapa -->
+                    <div class="card mb-4" id="mapaCard">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <span><i class="fa-solid fa-map me-1"></i> Gestão de Mapas</span>
+                            <button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#modalCreateMap"><i class="fa-solid fa-plus"></i> Adicionar</button>
+                        </div>
+                        <div class="card-body p-0">
+                            <ul class="list-group list-group-flush" id="mapsList">
+                                <!-- Maps will be loaded here -->
+                            </ul>
+                        </div>
+                    </div>
+
+                    <!-- Utilizadores -->
+                    <div class="card">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <span><i class="fa-solid fa-users me-1"></i> Utilizadores</span>
+                            <button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal"
+                                data-bs-target="#modalCreateUser"><i class="fa-solid fa-plus"></i> Adicionar</button>
+                        </div>
+                        <div class="card-body p-0">
+                            <ul class="list-group list-group-flush" id="usersList">
+                                <!-- Users will be loaded here -->
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tags Config -->
+                <div class="col-lg-7 mt-4 mt-lg-0" id="tagsConfigCol">
+                    <div class="card h-100">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <span><i class="fa-solid fa-tags me-1"></i> Gestão de Tags</span>
+                            <div>
+                                <button type="button" class="btn btn-sm btn-outline-primary me-2" data-bs-toggle="modal"
+                                    data-bs-target="#modalCreateTag">
+                                    <i class="fa-solid fa-plus me-1"></i> Adicionar Tag
+                                </button>
+                                <button type="button" class="btn btn-sm btn-success" id="btnSaveAllTags">
+                                    <i class="fa-solid fa-check-double me-1"></i> Gravar Todos os Nomes
+                                </button>
+                            </div>
+                        </div>
+                        <div class="card-body p-0">
+                            <div class="table-responsive" style="max-height: 700px; overflow-y: auto;">
+                                <table class="table table-hover table-striped mb-0 align-middle">
+                                    <thead class="sticky-top">
+                                        <tr>
+                                            <th scope="col" class="ps-4">Tag ID (MAC / Físico)</th>
+                                            <th scope="col">Nome Amigável (Alias)</th>
+                                            <th scope="col" class="text-end pe-4">Ações</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="tagsTableBody">
+                                        <!-- Tags will be loaded here -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="sessionLogsSection" class="row mt-4 d-none">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header d-flex flex-column flex-sm-row justify-content-between align-items-sm-center gap-2">
+                        <div>
+                            <span><i class="fa-solid fa-clock-rotate-left me-1"></i> Histórico de Eventos</span>
+                            <div class="small text-muted">Últimos eventos de sessão para o cliente selecionado</div>
+                        </div>
+                        <div class="d-flex gap-2 align-items-center">
+                            <select id="logActionFilter" class="form-select form-select-sm" style="width: auto;" onchange="reloadTenantSessionLogs()">
+                                <option value="">Todas as Ações</option>
+                                <option value="login">Login</option>
+                                <option value="logout">Logout</option>
+                                <option value="user_created">Utilizador Criado</option>
+                                <option value="user_deleted">Utilizador Apagado</option>
+                                <option value="map_created">Mapa Criado</option>
+                                <option value="map_updated">Mapa Atualizado</option>
+                                <option value="map_deleted">Mapa Apagado</option>
+                                <option value="tag_created">Tag Criada</option>
+                                <option value="tag_deleted">Tag Apagada</option>
+                                <option value="tag_aliases_updated">Alias de Tag(s) Atualizado</option>
+                            </select>
+                            <select id="logTimeFilter" class="form-select form-select-sm" style="width: auto;" onchange="reloadTenantSessionLogs()">
+                                <option value="-4h">Últimas 4 horas</option>
+                                <option value="-8h">Últimas 8 horas</option>
+                                <option value="-7d">Últimos 7 dias</option>
+                                <option value="-30d" selected>Últimos 30 dias</option>
+                            </select>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="reloadTenantSessionLogs()" title="Atualizar">
+                                <i class="fa-solid fa-arrows-rotate"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-body p-0">
+                        <div class="table-responsive" style="max-height: 360px; overflow-y: auto;">
+                            <table class="table table-sm table-hover mb-0 align-middle">
+                                <thead class="sticky-top bg-white">
+                                    <tr>
+                                        <th scope="col">Timestamp</th>
+                                        <th scope="col">Utilizador</th>
+                                        <th scope="col">Ação</th>
+                                        <th scope="col">Detalhes</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="sessionLogsTableBody">
+                                    <tr><td colspan="4" class="text-center text-muted">Selecione um cliente para carregar o histórico de sessão.</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODALS -->
+
+    <!-- Modal Create Tenant -->
+    <div class="modal fade" id="modalCreateTenant" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <form id="formCreateTenant">
+                    <div class="modal-header">
+                        <h5 class="modal-title">Criar Novo Cliente</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="mb-3">
+                            <label class="form-label">Nome do Cliente</label>
+                            <input type="text" class="form-control" id="newTenantName" required>
+                        </div>
+                        <div class="alert alert-info py-2 small mb-0">
+                            <i class="fa-solid fa-circle-info me-1"></i> O ID único do cliente será gerado automaticamente.
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                        <button type="submit" class="btn btn-success">Criar Cliente</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Create Map -->
+    <div class="modal fade" id="modalCreateMap" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <form id="formCreateMap">
+                    <div class="modal-header">
+                        <h5 class="modal-title">Adicionar Novo Mapa</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="mb-3">
+                            <label class="form-label">Nome da Área / Zona</label>
+                            <input type="text" class="form-control" id="newMapName" required>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Limite X (cm)</label>
+                                <input type="number" class="form-control" id="newMapX" min="0" step="0.1" required>
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Limite Y (cm)</label>
+                                <input type="number" class="form-control" id="newMapY" min="0" step="0.1" required>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Caminho da Imagem (Ex: /static/assets/mapa.png)</label>
+                            <input type="text" class="form-control" id="newMapPath">
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                        <button type="submit" class="btn btn-primary">Gravar Mapa</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Edit Map -->
+    <div class="modal fade" id="modalEditMap" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <form id="formEditMap">
+                    <input type="hidden" id="editMapIdTarget">
+                    <div class="modal-header">
+                        <h5 class="modal-title">Editar Mapa</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="mb-3">
+                            <label class="form-label">Nome da Área / Zona</label>
+                            <input type="text" class="form-control" id="editMapName" required>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Limite X (cm)</label>
+                                <input type="number" class="form-control" id="editMapX" min="0" step="0.1" required>
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Limite Y (cm)</label>
+                                <input type="number" class="form-control" id="editMapY" min="0" step="0.1" required>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Caminho da Imagem</label>
+                            <input type="text" class="form-control" id="editMapPath">
+                        </div>
+                        <div class="text-center">
+                            <img id="editMapPreview" src="" alt="Pré-visualização" class="img-fluid rounded border d-none" style="max-height: 200px; object-fit: contain;">
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                        <button type="submit" class="btn btn-primary">Gravar Alterações</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Edit Tenant -->
+    <div class="modal fade" id="modalEditTenant" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <form id="formEditTenant">
+                    <div class="modal-header">
+                        <h5 class="modal-title">Editar Cliente</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="mb-3">
+                            <label class="form-label">Nome do Cliente</label>
+                            <input type="text" class="form-control" id="editTenantName" required>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                        <button type="submit" class="btn btn-primary">Gravar Alterações</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Delete Tenant (CASCADE DELETE WARNING) -->
+    <div class="modal fade" id="modalDeleteTenant" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header bg-danger text-white">
+                    <h5 class="modal-title"><i class="fa-solid fa-triangle-exclamation me-2"></i> Apagar Cliente (Ação
+                        Irreversível)</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-danger fw-bold">
+                        ESTA AÇÃO IRÁ CAUSAR O CASCADE DELETE DE TODOS OS DADOS ASSOCIADOS A ESTE CLIENTE!
+                    </div>
+                    <p>Ao apagar este cliente, os seguintes dados serão eliminados definitivamente da base de dados:</p>
+                    <ul>
+                        <li><strong class="text-danger">Todos os Utilizadores</strong> associados a este cliente.</li>
+                        <li><strong class="text-danger">Todas as Tags</strong> (IDs físicos e nomes) monitorizadas.</li>
+                        <li><strong class="text-danger">O Mapa e os seus limites de escala</strong>.</li>
+                        <li><strong class="text-danger">As Âncoras</strong> associadas ao mapa.</li>
+                    </ul>
+                    <p>Tens a certeza absoluta de que pretendes continuar?</p>
+                </div>
+                <div class="modal-footer bg-light">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Não, cancelar</button>
+                    <button type="button" class="btn btn-danger fw-bold" id="confirmDeleteTenant">Sim, Apagar Cliente e
+                        Dados Associados</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Create User -->
+    <div class="modal fade" id="modalCreateUser" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <form id="formCreateUser">
+                    <div class="modal-header">
+                        <h5 class="modal-title">Adicionar Utilizador</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="mb-3">
+                            <label class="form-label">Username</label>
+                            <input type="text" class="form-control" id="newUsername" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Password</label>
+                            <input type="text" class="form-control" id="newUserPassword" required>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                        <button type="submit" class="btn btn-primary">Adicionar Utilizador</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Edit User -->
+    <div class="modal fade" id="modalEditUser" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <form id="formEditUser">
+                    <div class="modal-header">
+                        <h5 class="modal-title">Editar Password de Utilizador</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <input type="hidden" id="editUsernameTarget">
+                        <div class="mb-3">
+                            <label class="form-label">Novo Username para <strong id="editUsernameDisplay"></strong></label>
+                            <input type="text" class="form-control" id="editUserNewName" placeholder="Deixar em branco para manter o mesmo">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Nova Password</label>
+                            <input type="text" class="form-control" id="editUserPassword" placeholder="Deixar em branco para manter a mesma">
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                        <button type="submit" class="btn btn-primary">Gravar Alterações</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Create Tag -->
+    <div class="modal fade" id="modalCreateTag" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <form id="formCreateTag">
+                    <div class="modal-header">
+                        <h5 class="modal-title">Adicionar Tag</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="mb-3">
+                            <label class="form-label">Tag ID (MAC / Físico)</label>
+                            <input type="text" class="form-control" id="newTagId" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Nome Amigável (Alias)</label>
+                            <input type="text" class="form-control" id="newTagName" required>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                        <button type="submit" class="btn btn-primary">Adicionar Tag</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notification Container -->
+    <div class="toast-container"></div>
+
+    <!-- Auth System -->
+    <script src="/static/auth.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+
+    <script>
+        // redireciona e protege pagina
+        redirecionarSeNaoAutenticado();
+        verificarAdminAccess();
+
+        async function verificarAdminAccess() {
+            try {
+                const resposta = await fetch('/api/admin/tenants', {
+                    headers: { 'Authorization': `Bearer ${obterToken()}` }
+                });
+                if (!resposta.ok) {
+                    window.location.href = '/';
+                }
+            } catch {
+                window.location.href = '/';
+            }
+        }
+
+        // logica de interface
+        const tenantSelect = document.getElementById('tenantSelect');
+        const configSection = document.getElementById('configSection');
+        const mapConfigForm = document.getElementById('mapConfigForm');
+        const mapPath = document.getElementById('mapPath');
+        const mapPreview = document.getElementById('mapPreview');
+        const limiteX = document.getElementById('limiteX');
+        const limiteY = document.getElementById('limiteY');
+        const usersList = document.getElementById('usersList');
+        const tagsTableBody = document.getElementById('tagsTableBody');
+        const sessionLogsTableBody = document.getElementById('sessionLogsTableBody');
+        const sessionLogsSection = document.getElementById('sessionLogsSection');
+        const btnSaveAllTags = document.getElementById('btnSaveAllTags');
+
+        // Tenant action buttons
+        const btnEditTenant = document.getElementById('btnEditTenant');
+        const btnDeleteTenant = document.getElementById('btnDeleteTenant');
+
+        // Logout
+        document.getElementById('btnAdminLogout').addEventListener('click', async () => {
+            try {
+                await apiFetch('/logout', { method: 'POST' });
+            } catch {
+                // mesmo que o logout remoto falhe, continua a limpar a sessão local
+            }
+            localStorage.removeItem("cracha_jwt");
+            localStorage.removeItem("tenant_id");
+            localStorage.removeItem("login_timestamp");
+            window.location.href = '/';
+        });
+
+        // helper para API requests
+        async function apiFetch(url, options = {}) {
+            if (!options.headers) options.headers = {};
+            options.headers['Authorization'] = `Bearer ${obterToken()}`;
+            if (options.body && !(options.body instanceof FormData)) {
+                options.headers['Content-Type'] = 'application/json';
+                if (typeof options.body !== 'string') options.body = JSON.stringify(options.body);
+            }
+
+            const response = await fetch(url, options);
+            if (!response.ok) {
+                if (response.status === 401 || response.status === 403) {
+                    window.location.href = '/';
+                    throw new Error('Sessão expirada ou acesso negado');
+                }
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(errorData.detail || 'Erro na operação');
+            }
+            return response.json();
+        }
+
+        // helper para toasts (notificacoes)
+        function showToast(message, type = 'success') {
+            const toastContainer = document.querySelector('.toast-container');
+            const bgClass = type === 'success' ? 'bg-success' : 'bg-danger';
+            const icon = type === 'success' ? 'fa-check-circle' : 'fa-exclamation-circle';
+
+            const toastHtml = `
+                <div class="toast align-items-center text-white ${bgClass} border-0" role="alert" aria-live="assertive" aria-atomic="true">
+                    <div class="d-flex">
+                        <div class="toast-body">
+                            <i class="fa-solid ${icon} me-2"></i> ${message}
+                        </div>
+                        <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+                    </div>
+                </div>
+            `;
+
+            toastContainer.insertAdjacentHTML('beforeend', toastHtml);
+            const newToast = toastContainer.lastElementChild;
+            const bsToast = new bootstrap.Toast(newToast, { delay: 3000 });
+            bsToast.show();
+            newToast.addEventListener('hidden.bs.toast', () => newToast.remove());
+        }
+
+        function closeModal(modalId) {
+            const modalEl = document.getElementById(modalId);
+            const modal = bootstrap.Modal.getInstance(modalEl) || new bootstrap.Modal(modalEl);
+            modal.hide();
+        }
+
+        let tenantsMap = {};
+
+        // carrega lista de tenants ao iniciar
+        async function loadTenants(selectedId = null) {
+            try {
+                const tenants = await apiFetch('/api/admin/tenants');
+                tenantSelect.innerHTML = '<option value="" selected disabled>Escolha um cliente...</option>';
+                tenantsMap = {};
+                tenants.forEach(t => {
+                    tenantsMap[t.id] = t.nome;
+                    const option = document.createElement('option');
+                    option.value = t.id;
+                    option.textContent = t.nome;
+                    tenantSelect.appendChild(option);
+                });
+                if (selectedId && tenantsMap[selectedId]) {
+                    tenantSelect.value = selectedId;
+                    tenantSelect.dispatchEvent(new Event('change'));
+                }
+            } catch (error) {
+                showToast(error.message, 'error');
+                tenantSelect.innerHTML = '<option value="" disabled>Erro ao carregar</option>';
+            }
+        }
+
+        // carrega dados de um tenant especifico
+        async function loadTenantData(tenantId) {
+            try {
+                const data = await apiFetch(`/api/admin/config/${tenantId}`);
+
+                // preenche lista de mapas
+                const mapsList = document.getElementById('mapsList');
+                mapsList.innerHTML = '';
+                if (data.mapas && data.mapas.length > 0) {
+                    data.mapas.forEach(m => {
+                        mapsList.innerHTML += `
+                            <li class="list-group-item py-2 d-flex justify-content-between align-items-center">
+                                <div>
+                                    <div class="fw-bold"><i class="fa-solid fa-map text-secondary me-2"></i> ${m.nome}</div>
+                                    <small class="text-muted">Dimensões: ${m.limite_x}x${m.limite_y} cm</small>
+                                </div>
+                                <div>
+                                    <button class="btn btn-sm btn-outline-primary me-1" onclick="openEditMapModal(${m.id}, '${m.nome}', ${m.limite_x}, ${m.limite_y}, '${m.path || ''}')" title="Editar Mapa"><i class="fa-solid fa-pen"></i></button>
+                                    <button class="btn btn-sm btn-outline-danger" onclick="deleteMap(${m.id})" title="Apagar Mapa"><i class="fa-solid fa-trash"></i></button>
+                                </div>
+                            </li>`;
+                    });
+                } else {
+                    mapsList.innerHTML = '<li class="list-group-item text-muted">Nenhum mapa configurado</li>';
+                }
+
+                // preenche lista de users
+                usersList.innerHTML = '';
+                if (data.users && data.users.length > 0) {
+                    data.users.forEach(user => {
+                        usersList.innerHTML += `
+                            <li class="list-group-item py-2">
+                                <div><i class="fa-solid fa-user text-secondary me-2"></i> ${user}</div>
+                                <div>
+                                    <button class="btn btn-sm btn-outline-primary me-1" onclick="openEditUserModal('${user}')" title="Alterar Password"><i class="fa-solid fa-pen"></i></button>
+                                    <button class="btn btn-sm btn-outline-danger" onclick="deleteUser('${user}')" title="Apagar Utilizador"><i class="fa-solid fa-trash"></i></button>
+                                </div>
+                            </li>`;
+                    });
+                } else {
+                    usersList.innerHTML = '<li class="list-group-item text-muted">Nenhum utilizador associado</li>';
+                }
+
+                // preenche tabela de tags
+                tagsTableBody.innerHTML = '';
+                if (data.tags && data.tags.length > 0) {
+                    data.tags.forEach(tag => {
+                        tagsTableBody.innerHTML += `
+                            <tr>
+                                <td class="ps-4 text-secondary font-monospace">${tag.tag_id}</td>
+                                <td>
+                                    <input type="text" class="form-control form-control-sm tag-alias-input" 
+                                           data-tag-id="${tag.tag_id}" 
+                                           value="${tag.friendly_name || tag.tag_id}">
+                                </td>
+                                <td class="text-end pe-4">
+                                    <button class="btn btn-sm btn-outline-danger" onclick="deleteTag('${tag.tag_id}')"><i class="fa-solid fa-trash"></i></button>
+                                </td>
+                            </tr>
+                        `;
+                    });
+                } else {
+                    tagsTableBody.innerHTML = '<tr><td colspan="3" class="text-center text-muted">Nenhuma tag associada a este cliente.</td></tr>';
+                }
+
+                configSection.classList.remove('d-none');
+                document.getElementById('mapaCard').classList.remove('d-none');
+                document.getElementById('tagsConfigCol').classList.remove('d-none');
+                btnEditTenant.classList.remove('d-none');
+                btnDeleteTenant.classList.remove('d-none');
+                sessionLogsSection.classList.remove('d-none');
+                loadTenantSessionLogs(tenantId);
+            } catch (error) {
+                showToast(error.message, 'error');
+                configSection.classList.add('d-none');
+                btnEditTenant.classList.add('d-none');
+                btnDeleteTenant.classList.add('d-none');
+            }
+        }
+
+        tenantSelect.addEventListener('change', (e) => {
+            const tenantId = e.target.value;
+            if (tenantId) loadTenantData(tenantId);
+        });
+
+        // Gestão de Mapas
+        document.getElementById('formCreateMap').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const tenantId = tenantSelect.value;
+            if (!tenantId) return showToast('Selecione um cliente primeiro.', 'error');
+            try {
+                await apiFetch('/api/admin/mapas', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        tenant_id: tenantId,
+                        nome: document.getElementById('newMapName').value.trim(),
+                        limite_x: parseFloat(document.getElementById('newMapX').value),
+                        limite_y: parseFloat(document.getElementById('newMapY').value),
+                        ficheiro_img: document.getElementById('newMapPath').value.trim() || null
+                    })
+                });
+                closeModal('modalCreateMap');
+                e.target.reset();
+                showToast('Mapa adicionado com sucesso!');
+                loadTenantData(tenantId);
+            } catch (error) {
+                showToast(error.message, 'error');
+            }
+        });
+
+        window.openEditMapModal = function(id, nome, x, y, path) {
+            document.getElementById('editMapIdTarget').value = id;
+            document.getElementById('editMapName').value = nome;
+            document.getElementById('editMapX').value = x;
+            document.getElementById('editMapY').value = y;
+            const pathInput = document.getElementById('editMapPath');
+            pathInput.value = path;
+            
+            updateMapPreview(path);
+
+            const modal = new bootstrap.Modal(document.getElementById('modalEditMap'));
+            modal.show();
+        };
+
+        function updateMapPreview(path) {
+            const preview = document.getElementById('editMapPreview');
+            if (path) {
+                let previewSrc = path;
+                if (previewSrc.startsWith('frontend/')) {
+                    previewSrc = previewSrc.replace('frontend/', '/static/');
+                } else if (!previewSrc.startsWith('/')) {
+                    previewSrc = '/' + previewSrc;
+                }
+                preview.src = previewSrc;
+                preview.classList.remove('d-none');
+            } else {
+                preview.classList.add('d-none');
+                preview.src = "";
+            }
+        }
+
+        document.getElementById('editMapPath').addEventListener('input', (e) => {
+            updateMapPreview(e.target.value.trim());
+        });
+
+        document.getElementById('formEditMap').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const tenantId = tenantSelect.value;
+            const mapId = document.getElementById('editMapIdTarget').value;
+            try {
+                await apiFetch(`/api/admin/mapas/${mapId}`, {
+                    method: 'PUT',
+                    body: JSON.stringify({
+                        nome: document.getElementById('editMapName').value.trim(),
+                        limite_x: parseFloat(document.getElementById('editMapX').value),
+                        limite_y: parseFloat(document.getElementById('editMapY').value),
+                        ficheiro_img: document.getElementById('editMapPath').value.trim() || null
+                    })
+                });
+                closeModal('modalEditMap');
+                showToast('Mapa atualizado com sucesso!');
+                loadTenantData(tenantId);
+            } catch (error) {
+                showToast(error.message, 'error');
+            }
+        });
+
+        window.deleteMap = async function(id) {
+            if (!confirm('ATENÇÃO: Apagar este mapa eliminará também todas as âncoras associadas. Deseja continuar?')) return;
+            try {
+                await apiFetch(`/api/admin/mapas/${id}`, { method: 'DELETE' });
+                showToast('Mapa e âncoras removidos com sucesso!');
+                loadTenantData(tenantSelect.value);
+            } catch (error) {
+                showToast(error.message, 'error');
+            }
+        };
+
+        // Tenant CRUD
+        document.getElementById('formCreateTenant').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const nome = document.getElementById('newTenantName').value.trim();
+            try {
+                const response = await apiFetch('/api/admin/tenants', {
+                    method: 'POST',
+                    body: { nome }
+                });
+                showToast('Cliente criado com sucesso!');
+                closeModal('modalCreateTenant');
+                document.getElementById('formCreateTenant').reset();
+                loadTenants(response.id);
+            } catch (error) {
+                showToast(error.message, 'error');
+            }
+        });
+
+        document.getElementById('btnEditTenant').addEventListener('click', () => {
+            const tenantId = tenantSelect.value;
+            document.getElementById('editTenantName').value = tenantsMap[tenantId] || '';
+        });
+
+        document.getElementById('formEditTenant').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const tenantId = tenantSelect.value;
+            const nome = document.getElementById('editTenantName').value.trim();
+            try {
+                await apiFetch(`/api/admin/tenants/${tenantId}`, {
+                    method: 'PUT',
+                    body: { nome }
+                });
+                showToast('Cliente atualizado com sucesso!');
+                closeModal('modalEditTenant');
+                loadTenants(tenantId);
+            } catch (error) {
+                showToast(error.message, 'error');
+            }
+        });
+
+        document.getElementById('confirmDeleteTenant').addEventListener('click', async () => {
+            const tenantId = tenantSelect.value;
+            try {
+                await apiFetch(`/api/admin/tenants/${tenantId}`, { method: 'DELETE' });
+                showToast('Cliente e dados associados apagados com sucesso!');
+                closeModal('modalDeleteTenant');
+                configSection.classList.add('d-none');
+                btnEditTenant.classList.add('d-none');
+                btnDeleteTenant.classList.add('d-none');
+                loadTenants();
+            } catch (error) {
+                showToast(error.message, 'error');
+                closeModal('modalDeleteTenant');
+            }
+        });
+
+        // User CRUD
+        document.getElementById('formCreateUser').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const tenantId = tenantSelect.value;
+            const username = document.getElementById('newUsername').value.trim();
+            const password = document.getElementById('newUserPassword').value;
+            try {
+                await apiFetch('/api/admin/users', {
+                    method: 'POST',
+                    body: { username, password, tenant_id: tenantId }
+                });
+                showToast('Utilizador criado com sucesso!');
+                closeModal('modalCreateUser');
+                document.getElementById('formCreateUser').reset();
+                loadTenantData(tenantId);
+            } catch (error) {
+                showToast(error.message, 'error');
+            }
+        });
+
+        function openEditUserModal(username) {
+            document.getElementById('editUsernameTarget').value = username;
+            document.getElementById('editUsernameDisplay').textContent = username;
+            document.getElementById('editUserNewName').value = username;
+            document.getElementById('editUserPassword').value = '';
+            const modal = new bootstrap.Modal(document.getElementById('modalEditUser'));
+            modal.show();
+        }
+
+        document.getElementById('formEditUser').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const username = document.getElementById('editUsernameTarget').value;
+            const new_username = document.getElementById('editUserNewName').value.trim();
+            const password = document.getElementById('editUserPassword').value;
+            try {
+                await apiFetch(`/api/admin/users/${username}`, {
+                    method: 'PUT',
+                    body: { 
+                        new_username: new_username ? new_username : undefined, 
+                        password: password ? password : undefined 
+                    }
+                });
+                showToast('Utilizador atualizado com sucesso!');
+                closeModal('modalEditUser');
+                loadTenantData(tenantSelect.value);
+            } catch (error) {
+                showToast(error.message, 'error');
+            }
+        });
+
+        async function deleteUser(username) {
+            if (!confirm(`Tens a certeza que pretendes apagar o utilizador '${username}'?`)) return;
+            try {
+                await apiFetch(`/api/admin/users/${username}`, { method: 'DELETE' });
+                showToast('Utilizador apagado com sucesso!');
+                loadTenantData(tenantSelect.value);
+            } catch (error) {
+                showToast(error.message, 'error');
+            }
+        }
+
+        // Tag CRUD
+        document.getElementById('formCreateTag').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const tenantId = tenantSelect.value;
+            const tag_id = document.getElementById('newTagId').value.trim();
+            const nome = document.getElementById('newTagName').value.trim();
+            try {
+                await apiFetch('/api/admin/tags', {
+                    method: 'POST',
+                    body: { tag_id, nome, tenant_id: tenantId }
+                });
+                showToast('Tag criada com sucesso!');
+                closeModal('modalCreateTag');
+                document.getElementById('formCreateTag').reset();
+                loadTenantData(tenantId);
+            } catch (error) {
+                showToast(error.message, 'error');
+            }
+        });
+
+        async function deleteTag(tagId) {
+            if (!confirm(`Tens a certeza que pretendes apagar a tag '${tagId}'?`)) return;
+            try {
+                await apiFetch(`/api/admin/tags/${tagId}`, { method: 'DELETE' });
+                showToast('Tag apagada com sucesso!');
+                loadTenantData(tenantSelect.value);
+            } catch (error) {
+                showToast(error.message, 'error');
+            }
+        }
+
+        function reloadTenantSessionLogs() {
+            const tenantId = tenantSelect.value;
+            if (tenantId) loadTenantSessionLogs(tenantId);
+        }
+
+        async function loadTenantSessionLogs(tenantId) {
+            try {
+                const timeFilter = document.getElementById('logTimeFilter').value;
+                const actionFilter = document.getElementById('logActionFilter').value;
+                
+                let url = `/api/admin/tenants/${tenantId}/sessions?start=${timeFilter}`;
+                if (actionFilter) {
+                    url += `&action=${actionFilter}`;
+                }
+
+                const data = await apiFetch(url);
+                renderSessionLogs(data.events || []);
+            } catch (error) {
+                sessionLogsTableBody.innerHTML = '<tr><td colspan="4" class="text-center text-danger">Não foi possível carregar o histórico de sessão.</td></tr>';
+                showToast(error.message, 'error');
+            }
+        }
+
+        function renderSessionLogs(logs) {
+            if (!logs || logs.length === 0) {
+                sessionLogsTableBody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">Sem eventos de login/logout para este cliente.</td></tr>';
+                return;
+            }
+
+            sessionLogsTableBody.innerHTML = logs.map(evento => {
+                const hora = new Date(evento.timestamp).toLocaleString('pt-PT', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                return `
+                    <tr>
+                        <td>${hora}</td>
+                        <td class="font-monospace">${evento.user_id || '-'}</td>
+                        <td>${evento.action || '-'}</td>
+                        <td>${evento.details || ''}</td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        // bulk tag alias update
+        btnSaveAllTags.addEventListener('click', async () => {
+            const tenantId = tenantSelect.value;
+            if (!tenantId) return;
+
+            const inputs = document.querySelectorAll('.tag-alias-input');
+            const tagsToUpdate = [];
+
+            inputs.forEach(input => {
+                tagsToUpdate.push({
+                    tag_id: input.getAttribute('data-tag-id'),
+                    friendly_name: input.value.trim()
+                });
+            });
+
+            if (tagsToUpdate.length === 0) return;
+
+            try {
+                btnSaveAllTags.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-1"></i> A gravar...';
+                btnSaveAllTags.disabled = true;
+
+                await apiFetch('/api/admin/tags/aliases', {
+                    method: 'POST',
+                    body: { tags: tagsToUpdate }
+                });
+
+                showToast('Nomes das tags atualizados com sucesso!');
+            } catch (error) {
+                showToast(error.message, 'error');
+            } finally {
+                btnSaveAllTags.innerHTML = '<i class="fa-solid fa-check-double me-1"></i> Gravar Todos os Nomes';
+                btnSaveAllTags.disabled = false;
+            }
+        });
+
+        // init
+        document.addEventListener('DOMContentLoaded', () => loadTenants());
+    </script>
+</body>
+
+</html>

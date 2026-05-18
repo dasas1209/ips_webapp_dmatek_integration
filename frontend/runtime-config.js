@@ -6,9 +6,6 @@
 
     const merged = {
         map: {
-            limiteXcm: 760,
-            limiteYcm: 500,
-            maxRastoPontos: 5000,
             maxRaioIncertezaPx: 50,
             baseRaioIncertezaPx: 10,
             crescimentoRaioIncertezaPx: 0.5,

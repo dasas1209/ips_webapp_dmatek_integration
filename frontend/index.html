@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="pt-PT">
 <head>
     <meta charset="UTF-8">
@@ -33,7 +33,6 @@
 
     <div id="seccao_dashboard" class="app-shell escondido">
         <aside class="sidebar-nav">
-            <img src="/static/assets/metric-logo.svg" alt="Metric4" class="metric-logo sidebar-logo">
             <div class="tenant-branding">
                 <div class="tenant-avatar" id="tenantAvatar">M4</div>
                 <div>
@@ -73,6 +72,9 @@
                         <div id="dropdownNotificacoes" class="notificacoes-dropdown escondido"></div>
                     </div>
                     <span class="user-chip" id="utilizadorAtivo">Utilizador: -</span>
+                    <button id="btnContaSettings" type="button" title="Definições de Conta" style="background:none;border:none;padding:4px;cursor:pointer;color:inherit;opacity:0.7;" aria-label="Definições de Conta">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                    </button>
                     <button id="btnAtualizar" class="btn btn-secondary" type="button">Atualizar</button>
                     <button id="btnLogout" class="btn btn-danger" type="button">Terminar sessão</button>
                 </div>
@@ -149,9 +151,42 @@
         </section>
     </div>
 
+    <!-- Modal: Definições de Conta -->
+    <div id="modalContaSettings" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:9999; align-items:center; justify-content:center;">
+        <div style="background:var(--surface, #1e293b); border:1px solid var(--border, #334155); border-radius:12px; padding:0; width:100%; max-width:420px; box-shadow:0 20px 60px rgba(0,0,0,0.5); font-family:Inter,sans-serif;">
+            <form id="formContaSettings">
+                <div style="display:flex; align-items:center; justify-content:space-between; padding:20px 24px 16px; border-bottom:1px solid var(--border, #334155);">
+                    <h5 style="margin:0; font-size:1rem; font-weight:600; color:var(--text-primary,#f1f5f9);">Definições de Conta</h5>
+                    <button type="button" id="btnFecharContaModal" style="background:none;border:none;cursor:pointer;color:var(--text-muted,#94a3b8);font-size:1.2rem;line-height:1;" aria-label="Fechar">&times;</button>
+                </div>
+                <div style="padding:20px 24px;">
+                    <p style="color:var(--text-muted,#94a3b8); font-size:0.85rem; margin-bottom:16px;">Deixa em branco os campos que não queres alterar.</p>
+                    <div style="margin-bottom:14px;">
+                        <label style="display:block; font-size:0.85rem; font-weight:500; color:var(--text-secondary,#cbd5e1); margin-bottom:6px;">Novo Username</label>
+                        <input type="text" id="settingsNewUsername" placeholder="Manter o atual" style="width:100%; padding:8px 12px; border-radius:8px; border:1px solid #cbd5e1; background:#ffffff; color:#1e293b; font-size:0.9rem; outline:none; box-sizing:border-box;">
+                    </div>
+                    <div style="margin-bottom:14px;">
+                        <label style="display:block; font-size:0.85rem; font-weight:500; color:var(--text-secondary,#cbd5e1); margin-bottom:6px;">Nova Password</label>
+                        <input type="password" id="settingsNewPassword" placeholder="Manter a atual" style="width:100%; padding:8px 12px; border-radius:8px; border:1px solid #cbd5e1; background:#ffffff; color:#1e293b; font-size:0.9rem; outline:none; box-sizing:border-box;">
+                    </div>
+                    <hr style="border:none; border-top:1px solid var(--border,#334155); margin:16px 0;">
+                    <div style="margin-bottom:6px;">
+                        <label style="display:block; font-size:0.85rem; font-weight:600; color:var(--text-secondary,#cbd5e1); margin-bottom:6px;">Password Atual <span style="color:#f87171;">*</span></label>
+                        <input type="password" id="settingsCurrentPassword" required placeholder="Necessário para confirmar" style="width:100%; padding:8px 12px; border-radius:8px; border:1px solid #cbd5e1; background:#ffffff; color:#1e293b; font-size:0.9rem; outline:none; box-sizing:border-box;">
+                    </div>
+                    <p id="settingsErro" style="color:#f87171; font-size:0.82rem; margin-top:8px; min-height:1em;"></p>
+                </div>
+                <div style="display:flex; gap:10px; justify-content:flex-end; padding:16px 24px; border-top:1px solid var(--border,#334155);">
+                    <button type="button" id="btnCancelarContaModal" class="btn btn-secondary">Cancelar</button>
+                    <button type="submit" class="btn btn-primary">Guardar Alterações</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <script src="/static/runtime-config.js"></script>
     <script src="/static/auth.js"></script>
-    <script src="/static/app.js?v=5.1"></script>
+    <script src="/static/app.js?v=5.5"></script>
 </body>
 </html>
 

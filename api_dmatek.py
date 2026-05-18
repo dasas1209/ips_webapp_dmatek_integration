@@ -9,13 +9,16 @@ import time
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from threading import Lock
-from typing import Optional
+from typing import List, Optional
+import uuid
+from pydantic import BaseModel
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.staticfiles import StaticFiles
+from influxdb_client import Point  # type: ignore
 from jose import JWTError, jwt  # type: ignore
 
 from config import (
@@ -27,8 +30,11 @@ from config import (
     LIMITE_DIAS_HISTORICO,
     SECRET_KEY,
     TOKEN_EXPIRY_HOURS,
+    ADMIN_TENANT_ID,
+    ADMIN_USERNAME,
 )
 from services.database import (
+    DB_PATH,
     get_db_connection,
     obter_limites_mapa,
     validar_tenant_id,
@@ -48,7 +54,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["Authorization", "Content-Type"],
 )
 
@@ -77,10 +83,15 @@ async def serve_auditoria():
     return FileResponse("frontend/auditoria.html")
 
 
+@app.get("/admin.html", include_in_schema=False)
+async def serve_admin():
+    return FileResponse("frontend/admin.html")
+
+
 # carregamento de utilizadores da base de dados
 
 def carregar_utilizadores_db() -> dict[str, dict]:
-    """carrega utilizadores da bd sqlite — substitui o csv placeholder"""
+    """carrega utilizadores da bd sqlite"""
     utilizadores: dict[str, dict] = {}
     try:
         with get_db_connection() as conn:
@@ -99,8 +110,8 @@ def carregar_utilizadores_db() -> dict[str, dict]:
         logger.info("Utilizadores carregados da BD: %s", len(utilizadores))
     except sqlite3.Error as exc:
         raise RuntimeError(
-            f"Falha ao ler utilizadores da BD: {exc}. "
-            "Garante que database_setup.py foi executado."
+            f"Falha ao ler utilizadores da BD ({DB_PATH.resolve()}): {exc}. "
+            "Corre database_setup.py ou reinicia a API após migração."
         ) from exc
     return utilizadores
 
@@ -151,7 +162,7 @@ def criar_token_jwt(dados: dict) -> str:
 
 
 def verificar_token(token: str = Depends(oauth2_scheme)) -> str:
-    """valida jwt e devolve tenant_id"""
+    """valida jwt e devolve tenant_id (usado em rotas de dados para rate limiting)"""
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])  # type: ignore
         tenant_id: Optional[str] = payload.get("tenant_id")
@@ -160,6 +171,36 @@ def verificar_token(token: str = Depends(oauth2_scheme)) -> str:
         return tenant_id
     except JWTError:
         raise HTTPException(status_code=401, detail="Acesso negado: token inválido ou expirado.")
+
+
+# ---------------------------------------------------------------------------
+# dependencia de administracao
+# ---------------------------------------------------------------------------
+
+def require_admin(tenant_id: str = Depends(verificar_token)) -> str:
+    """garante que o utilizador autenticado é o administrador do sistema."""
+    if tenant_id != ADMIN_TENANT_ID:
+        raise HTTPException(status_code=403, detail="Acesso negado: apenas o administrador do sistema.")
+    return tenant_id
+
+
+def log_audit_event(user_id: str, tenant_id: str, action: str, details: str = "") -> None:
+    """regista eventos no InfluxDB sem bloquear a rota principal."""
+    try:
+        point = (
+            Point("system_access_log")
+            .tag("user_id", user_id)
+            .tag("tenant_id", tenant_id)
+            .field("action", action)
+            .field("details", details)
+        )
+        get_influx_client().write_api().write(
+            bucket=INFLUX_BUCKET,
+            org=INFLUX_ORG,
+            record=point,
+        )
+    except Exception as exc:
+        print(f"Falha ao gravar evento de auditoria no InfluxDB: {exc}")
 
 
 def aplicar_rate_limit(tenant_id: str = Depends(verificar_token)) -> str:
@@ -176,7 +217,11 @@ def aplicar_rate_limit(tenant_id: str = Depends(verificar_token)) -> str:
 # rotas de autenticacao
 
 @app.post("/login", tags=["Autenticação"])
-def login(credenciais: OAuth2PasswordRequestForm = Depends(), request: Request = None):
+def login(
+    credenciais: OAuth2PasswordRequestForm = Depends(),
+    request: Request = None,
+    background_tasks: BackgroundTasks = None,
+):
     """autentica utilizador e devolve jwt"""
     # throttling por username — previne brute force
     if not login_rate_limiter.allow(credenciais.username):
@@ -196,14 +241,55 @@ def login(credenciais: OAuth2PasswordRequestForm = Depends(), request: Request =
         logger.error("tenant_id invalido detectado no login: user=%s", credenciais.username)
         raise HTTPException(status_code=400, detail="Identificador de cliente inválido.")
 
-    logger.info("Login bem-sucedido para user=%s tenant_id=%s", credenciais.username, tenant_id)
+    # obter o nome amigavel do cliente
+    try:
+        with get_db_connection() as conn:
+            cliente_row = conn.execute("SELECT nome FROM clientes WHERE id = ?", (tenant_id,)).fetchone()
+            tenant_nome = cliente_row["nome"] if cliente_row else tenant_id
+    except Exception:
+        tenant_nome = tenant_id
+
+    is_admin = tenant_id == ADMIN_TENANT_ID
+    logger.info("Login bem-sucedido para user=%s tenant_id=%s is_admin=%s", credenciais.username, tenant_id, is_admin)
+    background_tasks.add_task(
+        log_audit_event,
+        credenciais.username,
+        tenant_id,
+        "login",
+        "Login bem-sucedido",
+    )
     token = criar_token_jwt({"sub": credenciais.username, "tenant_id": tenant_id})
     return {
-        "access_token": token,
-        "token_type":   "bearer",
-        "tenant_id":    tenant_id,
-        "mensagem":     f"Bem-vindo, {credenciais.username}.",
+        "access_token":  token,
+        "token_type":    "bearer",
+        "tenant_id":     tenant_id,
+        "tenant_nome":   tenant_nome,
+        "is_admin":      is_admin,
+        "mensagem":      f"Bem-vindo, {credenciais.username}.",
     }
+
+
+@app.post("/logout", tags=["Autenticação"])
+def logout(
+    background_tasks: BackgroundTasks,
+    token: str = Depends(oauth2_scheme),
+):
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        user_id = payload.get("sub", "desconhecido")
+        tenant_id = payload.get("tenant_id", "desconhecido")
+    except Exception:
+        user_id = "desconhecido"
+        tenant_id = "desconhecido"
+        
+    background_tasks.add_task(
+        log_audit_event,
+        user_id,
+        tenant_id,
+        "logout",
+        "Logout de sessão",
+    )
+    return {"sucesso": True}
 
 
 # rotas de tempo real
@@ -238,9 +324,23 @@ def obter_posicoes(tenant_id: str = Depends(aplicar_rate_limit)):
                     "status":    linha.values.get("status") or "Urgency",
                 })
 
+        try:
+            with get_db_connection() as conn:
+                tags_db = conn.execute("SELECT id_fisico, nome FROM tags WHERE cliente_id = ?", (tenant_id,)).fetchall()
+                total_sql = len(tags_db)
+                nome_por_tag = {t["id_fisico"]: t["nome"] for t in tags_db}
+        except Exception:
+            total_sql = len(posicoes)
+            nome_por_tag = {}
+
+        # Add friendly names to positions
+        for p in posicoes:
+            p["nome"] = nome_por_tag.get(p["tag_id"], p["tag_id"])
+
         return {
             "tenant_id":            tenant_id,
             "total_tags_detetadas": len(posicoes),
+            "total_tags_sql":       total_sql,
             "dados":                posicoes,
         }
     except Exception as exc:
@@ -279,6 +379,16 @@ def obter_historico(
                     "bateria":   linha.values.get("bateria") or 0,
                     "status":    linha.values.get("status") or "Urgency",
                 })
+
+        try:
+            with get_db_connection() as conn:
+                tags_db = conn.execute("SELECT id_fisico, nome FROM tags WHERE cliente_id = ?", (tenant_id,)).fetchall()
+                nome_por_tag = {t["id_fisico"]: t["nome"] for t in tags_db}
+        except Exception:
+            nome_por_tag = {}
+
+        for p in posicoes:
+            p["nome"] = nome_por_tag.get(p["tag_id"], p["tag_id"])
 
         return {
             "tenant_id":            tenant_id,
@@ -606,3 +716,529 @@ def obter_dados_auditoria(
             status_code=500,
             detail=f"Erro ao gerar dados de auditoria: {exc}",
         )
+
+
+# rotas de administracao
+
+class MapaCreate(BaseModel):
+    nome: str
+    limite_x: float
+    limite_y: float
+    ficheiro_img: Optional[str] = None
+    tenant_id: str
+
+class MapaUpdate(BaseModel):
+    nome: str
+    limite_x: float
+    limite_y: float
+    ficheiro_img: Optional[str] = None
+
+class TagAliasUpdate(BaseModel):
+    tag_id: str
+    friendly_name: str
+
+class TagAliasesUpdate(BaseModel):
+    tags: List[TagAliasUpdate]
+
+class TenantCreate(BaseModel):
+    nome: str
+
+class TenantUpdate(BaseModel):
+    nome: str
+
+class UserCreate(BaseModel):
+    username: str
+    password: str
+    tenant_id: str
+
+class UserUpdate(BaseModel):
+    new_username: Optional[str] = None
+    password: Optional[str] = None
+
+class TagCreate(BaseModel):
+    tag_id: str
+    nome: str
+    tenant_id: str
+
+@app.get("/api/admin/tenants", tags=["Admin"])
+def admin_get_tenants(_: str = Depends(require_admin)):
+    """lista todos os tenants"""
+    try:
+        with get_db_connection() as conn:
+            clientes = conn.execute("SELECT id, nome FROM clientes").fetchall()
+            return [{"id": c["id"], "nome": c["nome"]} for c in clientes]
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"erro ao obter clientes: {exc}")
+
+@app.get("/api/mapas", tags=["General"])
+def obter_mapas_utilizador(tenant_id: str = Depends(aplicar_rate_limit)):
+    """devolve mapas associados ao utilizador autenticado"""
+    try:
+        with get_db_connection() as conn:
+            mapas = conn.execute("SELECT id, nome, limite_x, limite_y, ficheiro_img FROM mapas WHERE cliente_id = ?", (tenant_id,)).fetchall()
+            return [
+                {
+                    "id": m["id"],
+                    "nome": m["nome"],
+                    "limite_x": m["limite_x"],
+                    "limite_y": m["limite_y"],
+                    "path": m["ficheiro_img"]
+                } for m in mapas
+            ]
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"erro ao obter mapas: {exc}")
+
+@app.get("/api/admin/config/{tenant_id}", tags=["Admin"])
+def admin_get_config(tenant_id: str, _: str = Depends(require_admin)):
+    """obtem configuracoes de mapas, tags e utilizadores de um tenant."""
+    try:
+        with get_db_connection() as conn:
+            users = conn.execute(
+                "SELECT username FROM users WHERE cliente_id = ?", (tenant_id,)
+            ).fetchall()
+            mapas = conn.execute(
+                "SELECT id, nome, limite_x, limite_y, ficheiro_img FROM mapas WHERE cliente_id = ?",
+                (tenant_id,)
+            ).fetchall()
+            tags = conn.execute(
+                "SELECT id_fisico, nome FROM tags WHERE cliente_id = ?", (tenant_id,)
+            ).fetchall()
+            return {
+                "tenant_id": tenant_id,
+                "users": [u["username"] for u in users],
+                "mapas": [
+                    {
+                        "id": m["id"],
+                        "nome": m["nome"],
+                        "limite_x": m["limite_x"],
+                        "limite_y": m["limite_y"],
+                        "path": m["ficheiro_img"]
+                    } for m in mapas
+                ],
+                "tags": [
+                    {"tag_id": t["id_fisico"], "friendly_name": t["nome"]} for t in tags
+                ]
+            }
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"erro ao obter config: {exc}")
+
+@app.post("/api/admin/mapas", tags=["Admin"])
+def admin_create_mapa(
+    data: MapaCreate,
+    background_tasks: BackgroundTasks,
+    admin_tenant: str = Depends(require_admin),
+):
+    try:
+        with get_db_connection() as conn:
+            conn.execute(
+                "INSERT INTO mapas (nome, limite_x, limite_y, ficheiro_img, cliente_id) VALUES (?, ?, ?, ?, ?)",
+                (data.nome, data.limite_x, data.limite_y, data.ficheiro_img, data.tenant_id)
+            )
+            conn.commit()
+        background_tasks.add_task(
+            log_audit_event, admin_tenant, data.tenant_id,
+            "map_created", f"Mapa '{data.nome}' criado (Dimensões: {data.limite_x}x{data.limite_y} cm, Imagem: {data.ficheiro_img or 'Nenhuma'})",
+        )
+        return {"sucesso": True}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"erro ao criar mapa: {exc}")
+
+@app.put("/api/admin/mapas/{map_id}", tags=["Admin"])
+def admin_update_mapa(
+    map_id: int,
+    data: MapaUpdate,
+    background_tasks: BackgroundTasks,
+    admin_tenant: str = Depends(require_admin),
+):
+    try:
+        with get_db_connection() as conn:
+            row = conn.execute("SELECT cliente_id, nome, limite_x, limite_y, ficheiro_img FROM mapas WHERE id = ?", (map_id,)).fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Mapa não encontrado.")
+            conn.execute(
+                "UPDATE mapas SET nome = ?, limite_x = ?, limite_y = ?, ficheiro_img = ? WHERE id = ?",
+                (data.nome, data.limite_x, data.limite_y, data.ficheiro_img, map_id)
+            )
+            conn.commit()
+            
+        old_state = f"[{row['nome']} | {row['limite_x']}x{row['limite_y']} | {row['ficheiro_img'] or 'Sem IMG'}]"
+        new_state = f"[{data.nome} | {data.limite_x}x{data.limite_y} | {data.ficheiro_img or 'Sem IMG'}]"
+        
+        background_tasks.add_task(
+            log_audit_event, admin_tenant, row["cliente_id"],
+            "map_updated", f"Mapa ID:{map_id} atualizado. ANTES: {old_state} -> DEPOIS: {new_state}",
+        )
+        return {"sucesso": True}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"erro ao atualizar mapa: {exc}")
+
+@app.delete("/api/admin/mapas/{map_id}", tags=["Admin"])
+def admin_delete_mapa(
+    map_id: int,
+    background_tasks: BackgroundTasks,
+    admin_tenant: str = Depends(require_admin),
+):
+    try:
+        with get_db_connection() as conn:
+            row = conn.execute("SELECT cliente_id, nome FROM mapas WHERE id = ?", (map_id,)).fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Mapa não encontrado.")
+            conn.execute("DELETE FROM ancoras WHERE mapa_id = ?", (map_id,))
+            conn.execute("DELETE FROM mapas WHERE id = ?", (map_id,))
+            conn.commit()
+        background_tasks.add_task(
+            log_audit_event, admin_tenant, row["cliente_id"],
+            "map_deleted", f"Mapa '{row['nome']}' (ID: {map_id}) e todas as suas âncoras apagados.",
+        )
+        return {"sucesso": True}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"erro ao apagar mapa: {exc}")
+
+@app.post("/api/admin/tags/aliases", tags=["Admin"])
+def admin_update_aliases(
+    data: TagAliasesUpdate,
+    background_tasks: BackgroundTasks,
+    admin_tenant: str = Depends(require_admin),
+):
+    """atualiza os aliases das tags"""
+    try:
+        with get_db_connection() as conn:
+            for tag in data.tags:
+                conn.execute(
+                    "UPDATE tags SET nome = ? WHERE id_fisico = ?",
+                    (tag.friendly_name, tag.tag_id)
+                )
+            conn.commit()
+        aliases_log = ", ".join([f"[{t.tag_id} -> '{t.friendly_name}']" for t in data.tags])
+        background_tasks.add_task(
+            log_audit_event, admin_tenant, admin_tenant,
+            "tag_aliases_updated", f"Nomes de {len(data.tags)} tags atualizados: {aliases_log}",
+        )
+        return {"sucesso": True}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"erro ao atualizar tags: {exc}")
+
+# CRUD endpoints
+
+@app.post("/api/admin/tenants", tags=["Admin"])
+def admin_create_tenant(data: TenantCreate, background_tasks: BackgroundTasks, admin_tenant: str = Depends(require_admin)):
+    try:
+        with get_db_connection() as conn:
+            clean_name = re.sub(r'[^a-z0-9]', '_', data.nome.lower())
+            clean_name = re.sub(r'_+', '_', clean_name).strip('_')[:10]
+            suffix = uuid.uuid4().hex[:6]
+            novo_id = f"{clean_name}_{suffix}" if clean_name else f"tenant_{suffix}"
+            conn.execute("INSERT INTO clientes (id, nome) VALUES (?, ?)", (novo_id, data.nome))
+            conn.commit()
+            
+        background_tasks.add_task(
+            log_audit_event, admin_tenant, novo_id,
+            "tenant_created", f"Cliente '{data.nome}' criado com sucesso (ID: {novo_id}).",
+        )
+        return {"sucesso": True, "id": novo_id}
+    except sqlite3.IntegrityError:
+        raise HTTPException(status_code=400, detail="Erro interno ao gerar ID.")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"erro: {exc}")
+
+@app.put("/api/admin/tenants/{tenant_id}", tags=["Admin"])
+def admin_update_tenant(tenant_id: str, data: TenantUpdate, background_tasks: BackgroundTasks, admin_tenant: str = Depends(require_admin)):
+    try:
+        with get_db_connection() as conn:
+            row = conn.execute("SELECT nome FROM clientes WHERE id = ?", (tenant_id,)).fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Cliente não encontrado.")
+            conn.execute("UPDATE clientes SET nome = ? WHERE id = ?", (data.nome, tenant_id))
+            conn.commit()
+            
+        background_tasks.add_task(
+            log_audit_event, admin_tenant, tenant_id,
+            "tenant_updated", f"Cliente ID: {tenant_id} atualizado. Nome alterado de '{row['nome']}' para '{data.nome}'.",
+        )
+        return {"sucesso": True}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"erro: {exc}")
+
+@app.delete("/api/admin/tenants/{tenant_id}", tags=["Admin"])
+def admin_delete_tenant(tenant_id: str, background_tasks: BackgroundTasks, admin_tenant: str = Depends(require_admin)):
+    if tenant_id == ADMIN_TENANT_ID:
+        raise HTTPException(status_code=400, detail="Não pode apagar o utilizador administrador do sistema.")
+    try:
+        with get_db_connection() as conn:
+            row = conn.execute("SELECT nome FROM clientes WHERE id = ?", (tenant_id,)).fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Cliente não encontrado.")
+            
+            conn.execute("DELETE FROM tags WHERE cliente_id = ?", (tenant_id,))
+            conn.execute("DELETE FROM users WHERE cliente_id = ?", (tenant_id,))
+            mapas = conn.execute("SELECT id FROM mapas WHERE cliente_id = ?", (tenant_id,)).fetchall()
+            for mapa in mapas:
+                conn.execute("DELETE FROM ancoras WHERE mapa_id = ?", (mapa["id"],))
+            conn.execute("DELETE FROM mapas WHERE cliente_id = ?", (tenant_id,))
+            conn.execute("DELETE FROM clientes WHERE id = ?", (tenant_id,))
+            conn.commit()
+            global UTILIZADORES
+            UTILIZADORES = carregar_utilizadores_db()
+            
+        background_tasks.add_task(
+            log_audit_event, admin_tenant, tenant_id,
+            "tenant_deleted", f"Cliente '{row['nome']}' (ID: {tenant_id}) apagado e todos os seus dados eliminados em cascata (Utilizadores, Mapas, Tags, Âncoras).",
+        )
+        return {"sucesso": True}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"erro: {exc}")
+
+@app.post("/api/admin/users", tags=["Admin"])
+def admin_create_user(
+    data: UserCreate,
+    background_tasks: BackgroundTasks,
+    admin_tenant: str = Depends(require_admin),
+):
+    try:
+        with get_db_connection() as conn:
+            existing_user = conn.execute(
+                "SELECT u.username, c.nome as cliente_nome FROM users u JOIN clientes c ON u.cliente_id = c.id WHERE u.username = ?",
+                (data.username,)
+            ).fetchone()
+            if existing_user:
+                raise HTTPException(status_code=400, detail=f"O username '{data.username}' já está em uso no cliente '{existing_user['cliente_nome']}'.")
+            conn.execute(
+                "INSERT INTO users (username, password, cliente_id) VALUES (?, ?, ?)",
+                (data.username, data.password, data.tenant_id)
+            )
+            conn.commit()
+            global UTILIZADORES
+            UTILIZADORES = carregar_utilizadores_db()
+        background_tasks.add_task(
+            log_audit_event, admin_tenant, data.tenant_id,
+            "user_created", f"Utilizador '{data.username}' criado para este cliente.",
+        )
+        return {"sucesso": True}
+    except HTTPException:
+        raise
+    except sqlite3.IntegrityError:
+        raise HTTPException(status_code=400, detail="O username já existe.")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"erro: {exc}")
+
+@app.put("/api/admin/users/{username}", tags=["Admin"])
+def admin_update_user(username: str, data: UserUpdate, background_tasks: BackgroundTasks, admin_tenant: str = Depends(require_admin)):
+    if username == ADMIN_USERNAME and data.new_username and data.new_username != ADMIN_USERNAME:
+        raise HTTPException(status_code=400, detail="Não pode alterar o username da conta admin principal.")
+    try:
+        with get_db_connection() as conn:
+            db_user = conn.execute("SELECT password, cliente_id FROM users WHERE username = ?", (username,)).fetchone()
+            if not db_user:
+                raise HTTPException(status_code=404, detail="Utilizador não encontrado.")
+            if data.new_username and data.new_username != username:
+                existing_user = conn.execute(
+                    "SELECT u.username, c.nome as cliente_nome FROM users u JOIN clientes c ON u.cliente_id = c.id WHERE u.username = ?",
+                    (data.new_username,)
+                ).fetchone()
+                if existing_user:
+                    raise HTTPException(status_code=400, detail=f"O novo username '{data.new_username}' já está a ser utilizado.")
+            novo_user = data.new_username if data.new_username else username
+            nova_pass = data.password if data.password else db_user["password"]
+            pass_mudou = "Sim" if data.password else "Não"
+            conn.execute("UPDATE users SET username = ?, password = ? WHERE username = ?", (novo_user, nova_pass, username))
+            conn.commit()
+            global UTILIZADORES
+            UTILIZADORES = carregar_utilizadores_db()
+            
+        background_tasks.add_task(
+            log_audit_event, admin_tenant, db_user["cliente_id"],
+            "user_updated", f"Utilizador '{username}' atualizado. Novo Username: '{novo_user}', Password Alterada: {pass_mudou}.",
+        )
+        return {"sucesso": True}
+    except HTTPException:
+        raise
+    except sqlite3.IntegrityError:
+        raise HTTPException(status_code=400, detail="O novo username já está em uso.")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"erro: {exc}")
+
+@app.delete("/api/admin/users/{username}", tags=["Admin"])
+def admin_delete_user(
+    username: str,
+    background_tasks: BackgroundTasks,
+    admin_tenant: str = Depends(require_admin),
+):
+    if username == ADMIN_USERNAME:
+        raise HTTPException(status_code=400, detail="Não pode apagar a conta admin.")
+    try:
+        with get_db_connection() as conn:
+            row = conn.execute("SELECT cliente_id FROM users WHERE username = ?", (username,)).fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Utilizador não encontrado.")
+            conn.execute("DELETE FROM users WHERE username = ?", (username,))
+            conn.commit()
+            global UTILIZADORES
+            UTILIZADORES = carregar_utilizadores_db()
+        background_tasks.add_task(
+            log_audit_event, admin_tenant, row["cliente_id"],
+            "user_deleted", f"Utilizador '{username}' apagado permanentemente.",
+        )
+        return {"sucesso": True}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"erro: {exc}")
+
+@app.post("/api/admin/tags", tags=["Admin"])
+def admin_create_tag(
+    data: TagCreate,
+    background_tasks: BackgroundTasks,
+    admin_tenant: str = Depends(require_admin),
+):
+    try:
+        with get_db_connection() as conn:
+            conn.execute(
+                "INSERT INTO tags (id_fisico, nome, cliente_id) VALUES (?, ?, ?)",
+                (data.tag_id, data.nome, data.tenant_id)
+            )
+            conn.commit()
+        background_tasks.add_task(
+            log_audit_event, admin_tenant, data.tenant_id,
+            "tag_created", f"Nova Tag monitorizada: ID Físico '{data.tag_id}', Nome Amigável '{data.nome}'.",
+        )
+        return {"sucesso": True}
+    except sqlite3.IntegrityError:
+        raise HTTPException(status_code=400, detail="Tag já existe.")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"erro: {exc}")
+
+@app.delete("/api/admin/tags/{tag_id}", tags=["Admin"])
+def admin_delete_tag(
+    tag_id: str,
+    background_tasks: BackgroundTasks,
+    admin_tenant: str = Depends(require_admin),
+):
+    try:
+        with get_db_connection() as conn:
+            row = conn.execute("SELECT cliente_id FROM tags WHERE id_fisico = ?", (tag_id,)).fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Tag não encontrada.")
+            conn.execute("DELETE FROM tags WHERE id_fisico = ?", (tag_id,))
+            conn.commit()
+        background_tasks.add_task(
+            log_audit_event, admin_tenant, row["cliente_id"],
+            "tag_deleted", f"Tag '{tag_id}' apagada permanentemente.",
+        )
+        return {"sucesso": True}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"erro: {exc}")
+
+# ---------------------------------------------------------------------------
+# logs de auditoria
+# ---------------------------------------------------------------------------
+
+@app.get("/api/admin/tenants/{tenant_id}/sessions", tags=["Admin"])
+def admin_get_tenant_sessions(
+    tenant_id: str,
+    start: str = Query("-30d", description="Início relativo (ex: -7d) ou ISO 8601"),
+    stop: str = Query("now()", description="Fim relativo ou ISO 8601"),
+    action: Optional[str] = Query(None, description="Filtro opcional por tipo de ação"),
+    _: str = Depends(require_admin),
+):
+    """logs de auditoria do sistema para um cliente específico — visíveis pelo administrador."""
+    action_filter = f'|> filter(fn: (r) => r["action"] == "{action}")' if action else ""
+    query = f"""
+        from(bucket: "{INFLUX_BUCKET}")
+        |> range(start: {start}, stop: {stop})
+        |> filter(fn: (r) => r["_measurement"] == "system_access_log")
+        |> filter(fn: (r) => r["tenant_id"] == "{tenant_id}")
+        |> filter(fn: (r) => r["_field"] == "action" or r["_field"] == "details")
+        |> pivot(rowKey:["_time"], columnKey:["_field"], valueColumn:"_value")
+        {action_filter}
+        |> group()
+        |> sort(columns:["_time"], desc:true)
+        |> limit(n: 500)
+    """
+    try:
+        resultados = get_influx_client().query_api().query(org=INFLUX_ORG, query=query)
+        eventos = []
+        for tabela in resultados:
+            for registro in tabela.records:
+                ts = registro.values.get("_time")
+                eventos.append({
+                    "timestamp": ts.isoformat() if hasattr(ts, "isoformat") else str(ts),
+                    "user_id":   registro.values.get("user_id"),
+                    "tenant_id": registro.values.get("tenant_id"),
+                    "action":    registro.values.get("action"),
+                    "details":   registro.values.get("details") or "",
+                })
+        return {"events": eventos}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"erro ao buscar logs: {exc}")
+
+
+# auto-gestao de credenciais (qualquer utilizador autenticado)
+
+class SelfCredentialsUpdate(BaseModel):
+    new_username: Optional[str] = None
+    new_password: Optional[str] = None
+    current_password: str
+
+
+@app.put("/api/user/credentials", tags=["User"])
+def update_self_credentials(
+    data: SelfCredentialsUpdate,
+    background_tasks: BackgroundTasks,
+    token: str = Depends(oauth2_scheme)
+):
+    """permite ao utilizador autenticado alterar o seu proprio username e/ou password"""
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        current_username: str = payload.get("sub")
+        if not current_username:
+            raise HTTPException(status_code=401, detail="Token invalido")
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Token invalido")
+
+    with get_db_connection() as conn:
+        user = conn.execute("SELECT * FROM users WHERE username = ?", (current_username,)).fetchone()
+        if not user:
+            raise HTTPException(status_code=404, detail="Utilizador nao encontrado")
+
+        if data.current_password != user["password"]:
+            raise HTTPException(status_code=400, detail="Password atual incorreta")
+
+        if data.new_username and data.new_username != current_username:
+            conflito = conn.execute(
+                "SELECT u.username, c.nome AS tenant_nome FROM users u JOIN clientes c ON u.cliente_id = c.id WHERE u.username = ?",
+                (data.new_username,)
+            ).fetchone()
+            if conflito:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Username '{data.new_username}' ja existe (empresa: {conflito['tenant_nome']})"
+                )
+
+        new_name = data.new_username or current_username
+        new_password = data.new_password if data.new_password else user["password"]
+
+        conn.execute(
+            "UPDATE users SET username = ?, password = ? WHERE username = ?",
+            (new_name, new_password, current_username)
+        )
+        conn.commit()
+
+        global UTILIZADORES
+        UTILIZADORES = carregar_utilizadores_db()
+
+        pass_mudou = "Sim" if data.new_password else "Não"
+        background_tasks.add_task(
+            log_audit_event, current_username, user["cliente_id"],
+            "credentials_updated", f"O utilizador atualizou os seus dados. Novo Username: '{new_name}', Password Alterada: {pass_mudou}."
+        )
+
+        username_changed = bool(data.new_username and data.new_username != current_username)
+        return {"sucesso": True, "username_changed": username_changed}
