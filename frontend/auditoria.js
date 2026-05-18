@@ -567,49 +567,103 @@ async function exportarPDF() {
         pdf.setFont("helvetica", "normal");
         pdf.setTextColor(100, 120, 150);
         pdf.text(`Total: ${dadosAuditoria.incidentes.length} incidente(s) registado(s)`, W / 2, 25, { align: "center" });
-
-        const cabInc = ["Timestamp", "Tag", "Tipo", "Coord X (norm)", "Coord Y (norm)"];
-        const largInc = [55, 30, 40, 35, 35];
-        let xInc = 10;
-        let yInc = 35;
-
-        pdf.setFillColor(180, 30, 30);
-        pdf.rect(xInc, yInc, W - 20, 8, "F");
-        pdf.setTextColor(255, 255, 255);
-        pdf.setFontSize(8);
-        pdf.setFont("helvetica", "bold");
-        let xHI = xInc + 2;
-        cabInc.forEach((h, i) => {
-            pdf.text(h, xHI, yInc + 5.5);
-            xHI += largInc[i];
+        pdf.setFontSize(7.5);
+        pdf.setTextColor(120, 130, 160);
+        const notaIncidentes =
+            "Inclui leituras com estado anómalo e eventos de auditoria (offline, recuperação de sinal, emergência/pânico).";
+        const notaLinhas = pdf.splitTextToSize(notaIncidentes, W - 30);
+        let yNota = 29;
+        notaLinhas.forEach((ln) => {
+            pdf.text(ln, W / 2, yNota, { align: "center" });
+            yNota += 3.5;
         });
 
-        yInc += 8;
+        const cabInc = ["Data/Hora", "Tag", "Tipo", "X", "Y", "Descrição"];
+        const largInc = [30, 21, 26, 14, 14, 79];
+        const xInc = 10;
+        const margemFundo = 14;
+        const alturaCab = 8;
+        const linhaDescMm = 3.1;
+
+        const colX = (col) => {
+            let x = xInc + 2;
+            for (let j = 0; j < col; j += 1) x += largInc[j];
+            return x;
+        };
+
+        const desenharCabecalhoIncidentes = (yTop) => {
+            pdf.setFillColor(180, 30, 30);
+            pdf.rect(xInc, yTop, W - 20, alturaCab, "F");
+            pdf.setTextColor(255, 255, 255);
+            pdf.setFontSize(8);
+            pdf.setFont("helvetica", "bold");
+            let xh = xInc + 2;
+            cabInc.forEach((h, i) => {
+                pdf.text(h, xh, yTop + 5.5);
+                xh += largInc[i];
+            });
+            return yTop + alturaCab;
+        };
+
+        let yInc = yNota + 4;
         pdf.setFont("helvetica", "normal");
         if (dadosAuditoria.incidentes.length === 0) {
             pdf.setTextColor(100, 150, 100);
             pdf.setFontSize(11);
             pdf.text("Nenhum incidente registado neste período.", W / 2, yInc + 20, { align: "center" });
         } else {
+            yInc = desenharCabecalhoIncidentes(yInc);
             dadosAuditoria.incidentes.forEach((inc, idx) => {
-                if (yInc > H - 20) {
+                const descBruta =
+                    inc.descricao != null && String(inc.descricao).trim() !== ""
+                        ? String(inc.descricao).trim()
+                        : "—";
+                pdf.setFontSize(7);
+                pdf.setFont("helvetica", "normal");
+                const descLines = pdf.splitTextToSize(descBruta, largInc[5] - 2);
+                const rowH = Math.max(7, 4.2 + (descLines.length - 1) * linhaDescMm);
+
+                if (yInc + rowH > H - margemFundo) {
                     pdf.addPage("a4", "p");
-                    yInc = 20;
+                    pdf.setFillColor(244, 246, 251);
+                    pdf.rect(0, 0, W, H, "F");
+                    pdf.setTextColor(26, 31, 54);
+                    pdf.setFontSize(11);
+                    pdf.setFont("helvetica", "bold");
+                    pdf.text("Log de Incidentes (continuação)", W / 2, 12, { align: "center" });
+                    yInc = desenharCabecalhoIncidentes(18);
                 }
-                pdf.setFillColor(idx % 2 === 0 ? 255 : 255, idx % 2 === 0 ? 245 : 248, idx % 2 === 0 ? 245 : 248);
-                pdf.rect(xInc, yInc, W - 20, 7, "F");
-                pdf.setTextColor(40, 50, 70);
+
+                pdf.setFillColor(
+                    idx % 2 === 0 ? 255 : 248,
+                    idx % 2 === 0 ? 255 : 249,
+                    idx % 2 === 0 ? 255 : 252
+                );
+                pdf.rect(xInc, yInc, W - 20, rowH, "F");
+
                 const xCoord = inc.x != null ? String(inc.x) : "n/a";
                 const yCoord = inc.y != null ? String(inc.y) : "n/a";
-                const linhaInc = [formatarData(inc.timestamp), inc.tag_id, inc.tipo, xCoord, yCoord];
-                let xLI = xInc + 2;
-                linhaInc.forEach((v, i) => {
-                    if (i === 2) pdf.setTextColor(180, 30, 30);
-                    pdf.text(v, xLI, yInc + 5);
-                    pdf.setTextColor(40, 50, 70);
-                    xLI += largInc[i];
+                const yTxt = yInc + 4.5;
+                pdf.setFontSize(7.5);
+                pdf.setTextColor(40, 50, 70);
+                pdf.text(formatarData(inc.timestamp), colX(0), yTxt);
+                pdf.text(String(inc.tag_id), colX(1), yTxt);
+                pdf.setTextColor(180, 30, 30);
+                pdf.text(String(inc.tipo || ""), colX(2), yTxt);
+                pdf.setTextColor(40, 50, 70);
+                pdf.text(xCoord, colX(3), yTxt);
+                pdf.text(yCoord, colX(4), yTxt);
+
+                let yD = yInc + 3.6;
+                pdf.setFontSize(7);
+                pdf.setTextColor(55, 65, 90);
+                descLines.forEach((line) => {
+                    pdf.text(line, colX(5), yD);
+                    yD += linhaDescMm;
                 });
-                yInc += 7;
+                pdf.setTextColor(40, 50, 70);
+
+                yInc += rowH;
             });
         }
 

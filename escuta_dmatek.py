@@ -6,7 +6,6 @@ motor de escuta websocket dmatek para influxdb
 import asyncio
 import json
 import time
-from datetime import datetime
 
 import websockets
 from influxdb_client import InfluxDBClient, Point  # type: ignore
@@ -38,13 +37,37 @@ registo_de_tags: dict[str, dict] = {}
 MATRIZ_CLIENTES: dict[str, str] = carregar_matriz_clientes()
 
 
-# log de eventos criticos
+# log de eventos criticos (measurement dedicada no influx — ver api /relatorio/dados)
 
-def registar_evento(tag_id: str, evento: str, detalhes: str) -> None:
-    """regista linha de erro no ficheiro csv"""
-    hora_atual = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    with open("auditoria_tags.csv", mode="a", newline="", encoding="utf-8") as fh:
-        csv.writer(fh, delimiter=";").writerow([hora_atual, tag_id, evento, detalhes])
+
+async def escrever_evento_auditoria(
+    tag_id: str,
+    tipo: str,
+    descricao: str,
+    *,
+    coord_x: float | None = None,
+    coord_y: float | None = None,
+) -> None:
+    """grava evento de auditoria (offline, recovery, emergência) no bucket influx."""
+    tenant_id = MATRIZ_CLIENTES.get(tag_id, "cliente_desconhecido")
+    texto = (descricao or "")[:1024] or "-"
+    ponto = (
+        Point("evento_auditoria")
+        .tag("tag_id", tag_id)
+        .tag("tenant_id", tenant_id)
+        .tag("tipo", tipo)
+        .field("descricao", texto)
+    )
+    if coord_x is not None:
+        ponto = ponto.field("coord_x", float(coord_x))
+    if coord_y is not None:
+        ponto = ponto.field("coord_y", float(coord_y))
+    await asyncio.to_thread(
+        _write_api.write,
+        bucket=INFLUX_BUCKET,
+        org=INFLUX_ORG,
+        record=ponto,
+    )
 
 
 # rotinas de verificacao de saude
@@ -61,7 +84,7 @@ async def monitorizar_saude() -> None:
                 info["status"] = "offline"
                 msg = f"Sem sinal há {tempo_sem_sinal:.1f}s"
                 print(f"[ALERTA] Tag {tag_id} ficou OFFLINE! ({msg})")
-                registar_evento(tag_id, "OFFLINE_ALARM", msg)
+                await escrever_evento_auditoria(tag_id, "OFFLINE_ALARM", msg)
 
         await asyncio.sleep(2)
 
@@ -109,10 +132,12 @@ async def escutar_fabrica() -> None:
                         # alerta de emergência activado
                         if estado_tag == "Urgency":
                             print(f"[EMERGÊNCIA] Botão de pânico na Tag {tag_id}!")
-                            registar_evento(
+                            await escrever_evento_auditoria(
                                 tag_id,
                                 "EMERGENCY_BUTTON",
                                 f"Botão de pânico premido na coordenada X:{px} Y:{py}",
+                                coord_x=float(px),
+                                coord_y=float(py),
                             )
 
                         # tag recuperada e novamente activa
@@ -124,7 +149,13 @@ async def escutar_fabrica() -> None:
                         }
                         if estava_offline:
                             print(f"[RECOVERY] Tag {tag_id} voltou a estar ONLINE.")
-                            registar_evento(tag_id, "ONLINE_RECOVERY", "A tag voltou a comunicar com a rede.")
+                            await escrever_evento_auditoria(
+                                tag_id,
+                                "ONLINE_RECOVERY",
+                                "A tag voltou a comunicar com a rede.",
+                                coord_x=float(px),
+                                coord_y=float(py),
+                            )
 
                         modo = "REPOUSO" if nm_time > 0 else "MOVIMENTO"
 

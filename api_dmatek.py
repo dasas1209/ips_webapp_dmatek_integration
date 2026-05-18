@@ -9,7 +9,6 @@ import logging
 import time
 from collections import Counter
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from threading import Lock
 from typing import Optional
 
@@ -406,19 +405,6 @@ async def obter_kpis_turno_legado(
 
 # rotas de auditoria
 
-def _obter_tags_do_cliente(cliente_id: str) -> set[str]:
-    """devolve o conjunto de id_fisico das tags associadas ao cliente via bd"""
-    try:
-        with get_db_connection() as conn:
-            rows = conn.execute(
-                "SELECT id_fisico FROM tags WHERE cliente_id = ?",
-                (cliente_id,),
-            ).fetchall()
-        return {row["id_fisico"] for row in rows}
-    except sqlite3.Error as exc:
-        logger.error("falha ao obter tags do cliente %s: %s", cliente_id, exc)
-        return set()
-
 
 def _obter_limites_mapa_cliente(cliente_id: str) -> tuple[float, float]:
     """devolve (limite_x, limite_y) do mapa do cliente a partir da bd"""
@@ -436,57 +422,53 @@ def _obter_limites_mapa_cliente(cliente_id: str) -> tuple[float, float]:
     return LIMITE_X_CM, LIMITE_Y_CM
 
 
-def _carregar_eventos_csv(inicio_dt: datetime, fim_dt: datetime, cliente_id: str) -> list[dict]:
-    """le o ficheiro de auditoria local e devolve eventos do cliente no intervalo temporal"""
-    tags_do_cliente = _obter_tags_do_cliente(cliente_id)
-    limite_x, limite_y = _obter_limites_mapa_cliente(cliente_id)
-
+def _eventos_auditoria_influx_para_incidentes(
+    tabelas,
+    limite_x: float,
+    limite_y: float,
+) -> list[dict]:
+    """converte resultados flux da measurement evento_auditoria para o formato da lista incidentes."""
     eventos: list[dict] = []
-    csv_path = Path(__file__).parent / "auditoria_tags.csv"
-    if not csv_path.exists():
-        return eventos
-
-    with open(csv_path, encoding="utf-8") as fh:
-        for linha in fh:
-            linha = linha.strip()
-            if not linha:
-                continue
-            partes = linha.split(";", 3)
-            if len(partes) < 3:
+    for table in tabelas:
+        for record in table.records:
+            tag_id = record.values.get("tag_id")
+            tipo = record.values.get("tipo")
+            ts = record.values.get("_time")
+            if tag_id is None or tipo is None or ts is None:
                 continue
 
-            ts_str    = partes[0].strip()
-            tag_id    = partes[1].strip()
-            tipo      = partes[2].strip()
-            descricao = partes[3].strip() if len(partes) > 3 else ""
-
-            if tag_id not in tags_do_cliente:
-                continue
-
-            try:
-                ts_dt = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
-            except ValueError:
-                continue
-
-            if ts_dt < inicio_dt or ts_dt > fim_dt:
-                continue
+            descricao = record.values.get("descricao") or ""
+            if isinstance(descricao, str) and descricao == "-":
+                descricao = ""
 
             x_norm, y_norm = None, None
-            match = re.search(r"X:(\d+(?:\.\d+)?)\s+Y:(\d+(?:\.\d+)?)", descricao)
-            if match:
-                x_norm = round(float(match.group(1)) / limite_x, 5)
-                y_norm = round(float(match.group(2)) / limite_y, 5)
+            x_cm = record.values.get("coord_x")
+            y_cm = record.values.get("coord_y")
+            if x_cm is not None and y_cm is not None:
+                try:
+                    x_norm = round(float(x_cm) / limite_x, 5)
+                    y_norm = round(float(y_cm) / limite_y, 5)
+                except (TypeError, ValueError):
+                    pass
+            if x_norm is None and descricao:
+                match = re.search(r"X:(\d+(?:\.\d+)?)\s+Y:(\d+(?:\.\d+)?)", str(descricao))
+                if match:
+                    try:
+                        x_norm = round(float(match.group(1)) / limite_x, 5)
+                        y_norm = round(float(match.group(2)) / limite_y, 5)
+                    except (TypeError, ValueError):
+                        pass
 
+            ts_iso = ts.isoformat() if hasattr(ts, "isoformat") else str(ts)
             eventos.append({
                 "tag_id":    tag_id,
-                "timestamp": ts_dt.isoformat(),
+                "timestamp": ts_iso,
                 "tipo":      tipo,
                 "descricao": descricao,
                 "x":         x_norm,
                 "y":         y_norm,
-                "fonte":     "csv",
+                "fonte":     "influx_evento",
             })
-
     return eventos
 
 
@@ -538,9 +520,22 @@ def obter_dados_auditoria(
         |> sort(columns: ["_time"])
     """
 
+    query_eventos_auditoria = f"""
+        from(bucket: "{INFLUX_BUCKET}")
+        |> range(start: {inicio_safe}, stop: {fim_safe})
+        |> filter(fn: (r) => r["_measurement"] == "evento_auditoria")
+        |> filter(fn: (r) => r["tenant_id"] == "{cliente_id}")
+        |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
+        |> sort(columns: ["_time"])
+    """
+
     try:
+        limite_x, limite_y = _obter_limites_mapa_cliente(cliente_id)
+
         with InfluxDBClient(url=INFLUX_URL, token=INFLUX_TOKEN, org=INFLUX_ORG) as client:
-            resultado = client.query_api().query(org=INFLUX_ORG, query=query_trajetoria)
+            qa = client.query_api()
+            resultado = qa.query(org=INFLUX_ORG, query=query_trajetoria)
+            resultado_eventos = qa.query(org=INFLUX_ORG, query=query_eventos_auditoria)
 
         esparguete_pontos: list[dict] = []
         incidentes:        list[dict] = []
@@ -638,12 +633,13 @@ def obter_dados_auditoria(
 
         kpis_por_tag.sort(key=lambda t: t["tag_id"])
 
-        # junta eventos do csv de historico
         try:
-            eventos_csv = _carregar_eventos_csv(dt_inicio, dt_fim, cliente_id)
-            incidentes.extend(eventos_csv)
+            eventos_audit = _eventos_auditoria_influx_para_incidentes(
+                resultado_eventos, limite_x, limite_y
+            )
+            incidentes.extend(eventos_audit)
         except Exception:
-            pass
+            logger.exception("falha ao agregar eventos evento_auditoria do influx")
 
         incidentes.sort(key=lambda x: x.get("timestamp", ""))
 
