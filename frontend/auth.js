@@ -1,4 +1,4 @@
-﻿/**
+/**
  * auth.js
  * modulo partilhado de autenticacao metric4 rtls
  * incluir antes de qualquer outro script que precise de autenticacao:
@@ -6,10 +6,32 @@
  */
 
 /**
- * le jwt do localstorage
+ * verifica se o jwt guardado em localstorage esta expirado
+ * @returns {boolean}
+ */
+function tokenExpirado() {
+    const token = localStorage.getItem("cracha_jwt");
+    if (!token) return true;
+    try {
+        const payloadB64 = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+        const payload    = JSON.parse(atob(payloadB64));
+        // exp esta em segundos unix — compara com Date.now() em ms
+        return Date.now() >= payload.exp * 1000;
+    } catch {
+        return true;
+    }
+}
+
+/**
+ * le jwt do localstorage — devolve null se ausente ou expirado
  * @returns {string|null}
  */
 function obterToken() {
+    if (tokenExpirado()) {
+        localStorage.removeItem("cracha_jwt");
+        localStorage.removeItem("tenant_id");
+        return null;
+    }
     return localStorage.getItem("cracha_jwt");
 }
 
@@ -43,4 +65,3 @@ function redirecionarSeNaoAutenticado() {
         window.location.href = "/";
     }
 }
-

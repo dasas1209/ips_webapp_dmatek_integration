@@ -8,6 +8,8 @@ import logging
 import sqlite3
 from pathlib import Path
 
+from services.database import get_db_connection
+
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger("metric4.db_setup")
 
@@ -18,18 +20,6 @@ DB_PATH  = BASE_DIR / "metric4rtls_system.db"
 # csvs de origem — apagados apos seeding bem-sucedido
 CSV_CLIENTES  = BASE_DIR / "matriz_clientes.csv"
 CSV_USUARIOS  = BASE_DIR / "utilizadores_placeholder.csv"
-
-
-# ---------------------------------------------------------------------------
-# ligacao
-# ---------------------------------------------------------------------------
-
-def get_connection() -> sqlite3.Connection:
-    """devolve ligacao com row_factory e fks activas"""
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    return conn
 
 
 # ---------------------------------------------------------------------------
@@ -258,7 +248,7 @@ def main() -> None:
     logger.info("base de dados: %s", DB_PATH)
 
     try:
-        conn = get_connection()
+        conn = get_db_connection()
     except sqlite3.Error as exc:
         logger.error("nao foi possivel abrir a base de dados: %s", exc)
         raise SystemExit(1) from exc

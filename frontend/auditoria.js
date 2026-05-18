@@ -1,4 +1,4 @@
-﻿let dadosAuditoria = null;
+let dadosAuditoria = null;
 let imagemMapaAuditoria = new Image();
 let imagemLogoMetric4 = new Image();
 let logoCarregado = false;
@@ -40,6 +40,19 @@ function carregarLogo() {
         imagemLogoMetric4.onerror = () => resolve(false);
         imagemLogoMetric4.src = "/static/assets/metric-logo.svg";
     });
+}
+
+// renderiza o logotipo metric4 numa pagina do pdf
+function _adicionarLogoAoPdf(pdf, x, y, w, h) {
+    if (!logoCarregado) return;
+    const c = document.createElement("canvas");
+    c.width = 400;
+    c.height = 150;
+    const ctx = c.getContext("2d");
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, c.width, c.height);
+    ctx.drawImage(imagemLogoMetric4, 40, 45, 320, 60);
+    pdf.addImage(c.toDataURL("image/png"), "PNG", x, y, w, h);
 }
 
 window.onload = function () {
@@ -182,7 +195,7 @@ function renderizarEsparguetePreview(dados) {
     canvas.height = rect.height || 320;
     const ctx = canvas.getContext("2d");
 
-    const mapaPath = `/static/assets/mapa_${dados.cliente}.png`;
+    const mapaPath = `/static/assets/mapa_${dados.tenant_id}.png`;
     if (!imagemMapaAuditoria.src.includes(mapaPath)) {
         imagemMapaAuditoria.src = mapaPath;
         imagemMapaAuditoria.onload = () => desenharEsparguete(ctx, canvas, dados);
@@ -239,20 +252,19 @@ function desenharEsparguete(ctx, canvas, dados) {
 
 function renderizarTabelaKpis(kpis) {
     const tbody = document.getElementById("tbody-kpis");
-    tbody.innerHTML = "";
 
     if (kpis.length === 0) {
         tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#a0aec0;">Sem dados no período.</td></tr>';
         return;
     }
 
-    kpis.forEach((k) => {
+    // constroi todas as linhas de uma vez para evitar n reflows do dom
+    const linhas = kpis.map((k) => {
         const cor = k.bateria_min_perc <= 5 ? "red" : k.bateria_min_perc <= 20 ? "#fd7e14" : "#28a745";
         const alertaBadge = k.num_alertas > 0
             ? `<span class="badge-alerta">${k.num_alertas} alerta(s)</span>`
             : '<span class="badge-ok">OK</span>';
-
-        tbody.innerHTML += `
+        return `
             <tr>
                 <td><strong>${k.tag_id}</strong></td>
                 <td>${k.distancia_m}</td>
@@ -262,36 +274,34 @@ function renderizarTabelaKpis(kpis) {
                 <td>${alertaBadge}</td>
             </tr>`;
     });
+    tbody.innerHTML = linhas.join("");
 }
 
 function renderizarIncidentes(incidentes) {
     const lista = document.getElementById("lista-incidentes");
-    lista.innerHTML = "";
 
     if (incidentes.length === 0) {
         lista.innerHTML = '<li class="incident-empty">Nenhum incidente registado neste período.</li>';
         return;
     }
 
-    incidentes.forEach((inc) => {
-        const ts = formatarData(inc.timestamp);
-        const fonte = inc.fonte === "csv"
-            ? '<span style="font-size:10px;color:#8892b0;margin-left:6px;">[CSV]</span>'
-            : "";
+    // constroi todos os itens de uma vez para evitar n reflows do dom
+    const itens = incidentes.map((inc) => {
+        const ts   = formatarData(inc.timestamp);
         const desc = inc.descricao
             ? `<div class="incident-ts" style="font-style:italic;">${inc.descricao}</div>`
             : "";
-
-        lista.innerHTML += `
+        return `
             <li class="incident-item">
                 <div class="incident-body">
-                    <span class="incident-tag">${inc.tag_id}</span>${fonte}
+                    <span class="incident-tag">${inc.tag_id}</span>
                     <span class="incident-tipo">${inc.tipo}</span>
                     <div class="incident-ts">${ts}</div>
                     ${desc}
                 </div>
             </li>`;
     });
+    lista.innerHTML = itens.join("");
 }
 
 async function exportarPNG() {
@@ -336,7 +346,7 @@ async function exportarPNG() {
     const link = document.createElement("a");
     const iv = obterIntervaloISO();
     const dataStr = iv ? iv.inicio.slice(0, 10) : new Date().toISOString().slice(0, 10);
-    link.download = `auditoria_esparguete_${dadosAuditoria.cliente}_${dataStr}.png`;
+    link.download = `auditoria_esparguete_${dadosAuditoria.tenant_id}_${dataStr}.png`;
     link.href = exportCanvas.toDataURL("image/png");
     link.click();
 }
@@ -353,7 +363,7 @@ async function exportarPDF() {
     setEstadoCarregando(true, "A gerar PDF...");
 
     const { jsPDF } = window.jspdf;
-    const tenant = dadosAuditoria.cliente;
+    const tenant = dadosAuditoria.tenant_id;
     const iv = obterIntervaloISO();
 
     try {
@@ -364,17 +374,7 @@ async function exportarPDF() {
         pdf.setFillColor(26, 31, 54);
         pdf.rect(0, 0, W, H, "F");
 
-        if (logoCarregado) {
-            const cLogo = document.createElement("canvas");
-            cLogo.width = 400;
-            cLogo.height = 150;
-            const cctx = cLogo.getContext("2d");
-            cctx.fillStyle = "#ffffff";
-            cctx.fillRect(0, 0, cLogo.width, cLogo.height);
-            cctx.drawImage(imagemLogoMetric4, 40, 45, 320, 60);
-            const logoData = cLogo.toDataURL("image/png");
-            pdf.addImage(logoData, "PNG", W / 2 - 35, 12, 70, 18);
-        }
+        _adicionarLogoAoPdf(pdf, W / 2 - 35, 12, 70, 18);
 
         pdf.setFillColor(255, 255, 255);
         pdf.roundedRect(20, 40, W - 40, 60, 6, 6, "F");
@@ -427,16 +427,7 @@ async function exportarPDF() {
         pdf.setFillColor(244, 246, 251);
         pdf.rect(0, 0, Wl, Hl, "F");
 
-        if (logoCarregado) {
-            const cLogo2 = document.createElement("canvas");
-            cLogo2.width = 400;
-            cLogo2.height = 150;
-            const cctx2 = cLogo2.getContext("2d");
-            cctx2.fillStyle = "#ffffff";
-            cctx2.fillRect(0, 0, cLogo2.width, cLogo2.height);
-            cctx2.drawImage(imagemLogoMetric4, 40, 45, 320, 60);
-            pdf.addImage(cLogo2.toDataURL("image/png"), "PNG", 10, 6, 48, 12);
-        }
+        _adicionarLogoAoPdf(pdf, 10, 6, 48, 12);
 
         pdf.setTextColor(26, 31, 54);
         pdf.setFontSize(14);
@@ -484,16 +475,7 @@ async function exportarPDF() {
         pdf.setFillColor(244, 246, 251);
         pdf.rect(0, 0, W, H, "F");
 
-        if (logoCarregado) {
-            const cLogo3 = document.createElement("canvas");
-            cLogo3.width = 400;
-            cLogo3.height = 150;
-            const cctx3 = cLogo3.getContext("2d");
-            cctx3.fillStyle = "#ffffff";
-            cctx3.fillRect(0, 0, cLogo3.width, cLogo3.height);
-            cctx3.drawImage(imagemLogoMetric4, 40, 45, 320, 60);
-            pdf.addImage(cLogo3.toDataURL("image/png"), "PNG", 10, 6, 42, 10);
-        }
+        _adicionarLogoAoPdf(pdf, 10, 6, 42, 10);
 
         pdf.setTextColor(26, 31, 54);
         pdf.setFontSize(14);
@@ -548,16 +530,7 @@ async function exportarPDF() {
         pdf.setFillColor(244, 246, 251);
         pdf.rect(0, 0, W, H, "F");
 
-        if (logoCarregado) {
-            const cLogo4 = document.createElement("canvas");
-            cLogo4.width = 400;
-            cLogo4.height = 150;
-            const cctx4 = cLogo4.getContext("2d");
-            cctx4.fillStyle = "#ffffff";
-            cctx4.fillRect(0, 0, cLogo4.width, cLogo4.height);
-            cctx4.drawImage(imagemLogoMetric4, 40, 45, 320, 60);
-            pdf.addImage(cLogo4.toDataURL("image/png"), "PNG", 10, 6, 42, 10);
-        }
+        _adicionarLogoAoPdf(pdf, 10, 6, 42, 10);
 
         pdf.setTextColor(26, 31, 54);
         pdf.setFontSize(14);

@@ -2,22 +2,20 @@
 api_dmatek.py
 api rest do sistema metric4 rtls
 """
-import math
+import logging
 import re
 import sqlite3
-import logging
 import time
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from threading import Lock
 from typing import Optional
 
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.staticfiles import StaticFiles
-from influxdb_client import InfluxDBClient  # type: ignore
 from jose import JWTError, jwt  # type: ignore
 
 from config import (
@@ -25,24 +23,25 @@ from config import (
     ALLOWED_ORIGINS,
     INFLUX_BUCKET,
     INFLUX_ORG,
-    INFLUX_TOKEN,
-    INFLUX_URL,
     JANELA_KPI_HORAS,
     LIMITE_DIAS_HISTORICO,
-    LIMITE_X_CM,
-    LIMITE_Y_CM,
-    LIMIAR_MOVIMENTO_CM,
     SECRET_KEY,
     TOKEN_EXPIRY_HOURS,
 )
-from shared import get_db_connection
+from services.database import (
+    get_db_connection,
+    obter_limites_mapa,
+    validar_tenant_id,
+)
+from services.influx_client import get_influx_client
+from services.kpi_engine import KpiTag, RegistoTag, calcular_kpis
 
 # configuracao da aplicacao fastapi
 
 app = FastAPI(
     title="Portal de Dados RTLS — Metric4",
     description="API de Gestão Multi-Tenant para posições em tempo real.",
-    version="2.0.0",
+    version="2.1.0",
 )
 
 app.add_middleware(
@@ -58,6 +57,7 @@ app.mount("/static", StaticFiles(directory="frontend"), name="static")
 # logging de seguranca (sem coordenadas para minimizar exposição de localização)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("metric4.api")
+
 
 # serving de paginas html
 
@@ -108,8 +108,10 @@ def carregar_utilizadores_db() -> dict[str, dict]:
 UTILIZADORES: dict[str, dict] = carregar_utilizadores_db()
 
 
+# throttling por tenant/username
+
 class TenantRateLimiter:
-    """throttling em memória por tenant para reduzir risco de noisy neighbor"""
+    """throttling em memória por chave para reduzir risco de noisy neighbor e brute force"""
 
     def __init__(self, max_requests: int, window_seconds: int):
         self.max_requests = max_requests
@@ -117,19 +119,24 @@ class TenantRateLimiter:
         self._state: dict[str, dict[str, float | int]] = {}
         self._lock = Lock()
 
-    def allow(self, tenant_id: str) -> bool:
+    def allow(self, chave: str) -> bool:
         now = time.monotonic()
         with self._lock:
-            tenant_state = self._state.get(tenant_id)
-            if tenant_state is None or (now - float(tenant_state["window_start"])) >= self.window_seconds:
-                self._state[tenant_id] = {"window_start": now, "count": 1}
+            estado = self._state.get(chave)
+            if estado is None or (now - float(estado["window_start"])) >= self.window_seconds:
+                self._state[chave] = {"window_start": now, "count": 1}
                 return True
+            estado["count"] = int(estado["count"]) + 1
+            return int(estado["count"]) <= self.max_requests
 
-            tenant_state["count"] = int(tenant_state["count"]) + 1
-            return int(tenant_state["count"]) <= self.max_requests
 
-
+# throttling para endpoints autenticados (por tenant)
 tenant_rate_limiter = TenantRateLimiter(max_requests=120, window_seconds=60)
+
+# throttling para /login (por username) — previne brute force
+# futuro: substituir chave por ip (request.client.host) quando em ambiente de producao
+login_rate_limiter = TenantRateLimiter(max_requests=10, window_seconds=60)
+
 
 # configuracao de seguranca jwt
 
@@ -144,7 +151,7 @@ def criar_token_jwt(dados: dict) -> str:
 
 
 def verificar_token(token: str = Depends(oauth2_scheme)) -> str:
-    """valida jwt e devolve tenant id"""
+    """valida jwt e devolve tenant_id"""
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])  # type: ignore
         tenant_id: Optional[str] = payload.get("tenant_id")
@@ -169,8 +176,13 @@ def aplicar_rate_limit(tenant_id: str = Depends(verificar_token)) -> str:
 # rotas de autenticacao
 
 @app.post("/login", tags=["Autenticação"])
-def login(credenciais: OAuth2PasswordRequestForm = Depends()):
+def login(credenciais: OAuth2PasswordRequestForm = Depends(), request: Request = None):
     """autentica utilizador e devolve jwt"""
+    # throttling por username — previne brute force
+    if not login_rate_limiter.allow(credenciais.username):
+        logger.warning("Rate limit de login excedido para username=%s", credenciais.username)
+        raise HTTPException(status_code=429, detail="Demasiadas tentativas de login. Aguarde 1 minuto.")
+
     utilizador = UTILIZADORES.get(credenciais.username)
     if not utilizador:
         raise HTTPException(status_code=401, detail="Utilizador não existe.")
@@ -178,6 +190,12 @@ def login(credenciais: OAuth2PasswordRequestForm = Depends()):
         raise HTTPException(status_code=401, detail="Password incorreta.")
 
     tenant_id = utilizador["tenant_id"]
+
+    # valida tenant_id antes de assinar o jwt — previne flux injection
+    if not validar_tenant_id(tenant_id):
+        logger.error("tenant_id invalido detectado no login: user=%s", credenciais.username)
+        raise HTTPException(status_code=400, detail="Identificador de cliente inválido.")
+
     logger.info("Login bem-sucedido para user=%s tenant_id=%s", credenciais.username, tenant_id)
     token = criar_token_jwt({"sub": credenciais.username, "tenant_id": tenant_id})
     return {
@@ -202,8 +220,7 @@ def obter_posicoes(tenant_id: str = Depends(aplicar_rate_limit)):
             |> last()
             |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
         """
-        with InfluxDBClient(url=INFLUX_URL, token=INFLUX_TOKEN, org=INFLUX_ORG) as client:
-            tabelas = client.query_api().query(query)
+        tabelas = get_influx_client().query_api().query(query)
 
         posicoes = []
         for tabela in tabelas:
@@ -222,7 +239,7 @@ def obter_posicoes(tenant_id: str = Depends(aplicar_rate_limit)):
                 })
 
         return {
-            "cliente":              tenant_id,
+            "tenant_id":            tenant_id,
             "total_tags_detetadas": len(posicoes),
             "dados":                posicoes,
         }
@@ -245,8 +262,7 @@ def obter_historico(
             |> last()
             |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
         """
-        with InfluxDBClient(url=INFLUX_URL, token=INFLUX_TOKEN, org=INFLUX_ORG) as client:
-            tabelas = client.query_api().query(query)
+        tabelas = get_influx_client().query_api().query(query)
 
         posicoes = []
         for tabela in tabelas:
@@ -265,7 +281,7 @@ def obter_historico(
                 })
 
         return {
-            "cliente":              tenant_id,
+            "tenant_id":            tenant_id,
             "total_tags_detetadas": len(posicoes),
             "dados":                posicoes,
         }
@@ -274,6 +290,27 @@ def obter_historico(
 
 
 # rotas de kpis
+
+
+def _registos_de_tabelas_influx(resultado) -> list[RegistoTag]:
+    """converte resultado flux numa lista de RegistoTag para o kpi_engine"""
+    registos: list[RegistoTag] = []
+    for table in resultado:
+        for record in table.records:
+            tag_id  = record.values.get("tag_id")
+            x       = record.values.get("coord_x")
+            y       = record.values.get("coord_y")
+            if tag_id is None or x is None or y is None:
+                continue
+            registos.append(RegistoTag(
+                tag_id=tag_id,
+                x=x,
+                y=y,
+                timestamp=record.values.get("_time"),
+                bateria=record.values.get("bateria"),
+            ))
+    return registos
+
 
 async def _obter_kpis_turno_por_tenant(tenant_id: str):
     """calcula kpis da frota no turno actual"""
@@ -287,69 +324,20 @@ async def _obter_kpis_turno_por_tenant(tenant_id: str):
         |> sort(columns: ["_time"])
     """
 
-    frota = {"distancia_total_cm": 0.0, "leituras_em_movimento": 0, "leituras_totais": 0}
-    tags_processadas: dict[str, dict] = {}
-
     try:
-        with InfluxDBClient(url=INFLUX_URL, token=INFLUX_TOKEN, org=INFLUX_ORG) as client:
-            resultado = client.query_api().query(org=INFLUX_ORG, query=query)
+        resultado = get_influx_client().query_api().query(org=INFLUX_ORG, query=query)
+        registos = _registos_de_tabelas_influx(resultado)
+        tags = calcular_kpis(registos)
 
-        for table in resultado:
-            for record in table.records:
-                tag_id   = record.values.get("tag_id")
-                x_atual  = record.values.get("coord_x")
-                y_atual  = record.values.get("coord_y")
-                bateria  = record.values.get("bateria")
-
-                if tag_id is None or x_atual is None or y_atual is None:
-                    continue
-
-                frota["leituras_totais"] += 1
-
-                if tag_id not in tags_processadas:
-                    tags_processadas[tag_id] = {
-                        "ultimo_x": None, "ultimo_y": None,
-                        "bateria": 0, "distancia_cm": 0.0,
-                        "leituras_totais": 0, "leituras_em_movimento": 0,
-                    }
-
-                tag = tags_processadas[tag_id]
-                tag["leituras_totais"] += 1
-                if bateria is not None:
-                    tag["bateria"] = bateria
-
-                if tag["ultimo_x"] is not None:
-                    dist = math.sqrt(
-                        (x_atual - tag["ultimo_x"]) ** 2 +
-                        (y_atual - tag["ultimo_y"]) ** 2
-                    )
-                    frota["distancia_total_cm"] += dist
-                    tag["distancia_cm"]         += dist
-                    if dist > LIMIAR_MOVIMENTO_CM:
-                        frota["leituras_em_movimento"]  += 1
-                        tag["leituras_em_movimento"]    += 1
-
-                tag["ultimo_x"] = x_atual
-                tag["ultimo_y"] = y_atual
-
-        # agregados finais
-        distancia_m    = round(frota["distancia_total_cm"] / 100, 2)
+        distancia_m     = round(sum(t.distancia_m for t in tags.values()), 2)
         taxa_utilizacao = 0.0
-        if frota["leituras_totais"] > 0:
-            taxa_utilizacao = round(
-                (frota["leituras_em_movimento"] / frota["leituras_totais"]) * 100, 1
-            )
+        total_leituras  = sum(t.leituras_totais for t in tags.values())
+        total_movimento = sum(t.leituras_em_movimento for t in tags.values())
+        if total_leituras > 0:
+            taxa_utilizacao = round((total_movimento / total_leituras) * 100, 1)
 
-        baterias = [d["bateria"] for d in tags_processadas.values() if d["bateria"] > 0]
+        baterias = [t.bateria_ultima for t in tags.values() if t.bateria_ultima > 0]
         bateria_media = round(sum(baterias) / len(baterias), 1) if baterias else 0.0
-
-        grafico_distancias = {t: round(d["distancia_cm"] / 100, 2) for t, d in tags_processadas.items()}
-        grafico_utilizacao = {
-            t: round((d["leituras_em_movimento"] / d["leituras_totais"]) * 100, 1)
-            if d["leituras_totais"] > 0 else 0.0
-            for t, d in tags_processadas.items()
-        }
-        grafico_bateria = {t: round(d["bateria"], 1) for t, d in tags_processadas.items()}
 
         # total de tags registadas na bd (independente da actividade influx)
         try:
@@ -360,7 +348,7 @@ async def _obter_kpis_turno_por_tenant(tenant_id: str):
                 ).fetchone()
             total_assets_bd = row["n"] if row else 0
         except Exception:
-            total_assets_bd = len(tags_processadas)
+            total_assets_bd = len(tags)
 
         return {
             "sucesso":    True,
@@ -369,12 +357,12 @@ async def _obter_kpis_turno_por_tenant(tenant_id: str):
                 "distancia_percorrida_metros": distancia_m,
                 "taxa_utilizacao_perc":        taxa_utilizacao,
                 "bateria_media_frota_perc":    bateria_media,
-                "tags_ativas_turno":           len(tags_processadas),
+                "tags_ativas_turno":           len(tags),
                 "total_assets":                total_assets_bd,
             },
-            "grafico_distancias": grafico_distancias,
-            "grafico_utilizacao": grafico_utilizacao,
-            "grafico_bateria":    grafico_bateria,
+            "grafico_distancias": {t: kpi.distancia_m for t, kpi in tags.items()},
+            "grafico_utilizacao": {t: kpi.taxa_utilizacao_perc for t, kpi in tags.items()},
+            "grafico_bateria":    {t: round(kpi.bateria_ultima, 1) for t, kpi in tags.items()},
         }
 
     except Exception as exc:
@@ -406,34 +394,18 @@ async def obter_kpis_turno_legado(
 # rotas de auditoria
 
 
-def _obter_limites_mapa_cliente(cliente_id: str) -> tuple[float, float]:
-    """devolve (limite_x, limite_y) do mapa do cliente a partir da bd"""
-    try:
-        with get_db_connection() as conn:
-            row = conn.execute(
-                "SELECT limite_x, limite_y FROM mapas WHERE cliente_id = ? LIMIT 1",
-                (cliente_id,),
-            ).fetchone()
-        if row:
-            return float(row["limite_x"]), float(row["limite_y"])
-    except sqlite3.Error as exc:
-        logger.warning("nao foi possivel obter limites do mapa para %s: %s", cliente_id, exc)
-    # fallback defensivo para clientes sem mapa registado
-    return LIMITE_X_CM, LIMITE_Y_CM
-
-
 def _eventos_auditoria_influx_para_incidentes(
     tabelas,
     limite_x: float,
     limite_y: float,
 ) -> list[dict]:
-    """converte resultados flux da measurement evento_auditoria para o formato da lista incidentes."""
+    """converte resultados flux da measurement evento_auditoria para o formato da lista incidentes"""
     eventos: list[dict] = []
     for table in tabelas:
         for record in table.records:
             tag_id = record.values.get("tag_id")
-            tipo = record.values.get("tipo")
-            ts = record.values.get("_time")
+            tipo   = record.values.get("tipo")
+            ts     = record.values.get("_time")
             if tag_id is None or tipo is None or ts is None:
                 continue
 
@@ -476,7 +448,7 @@ def _eventos_auditoria_influx_para_incidentes(
 def obter_dados_auditoria(
     inicio: str = Query(..., description="Início ISO 8601, ex: 2026-05-11T06:00:00Z"),
     fim:    str = Query(..., description="Fim ISO 8601, ex: 2026-05-11T14:00:00Z"),
-    cliente_id: str = Depends(aplicar_rate_limit),
+    tenant_id: str = Depends(aplicar_rate_limit),
 ):
     """consulta fluxo temporal completo para dashboard de auditoria"""
 
@@ -514,7 +486,7 @@ def obter_dados_auditoria(
         from(bucket: "{INFLUX_BUCKET}")
         |> range(start: {inicio_safe}, stop: {fim_safe})
         |> filter(fn: (r) => r["_measurement"] == "posicao_tag")
-        |> filter(fn: (r) => r["tenant_id"] == "{cliente_id}")
+        |> filter(fn: (r) => r["tenant_id"] == "{tenant_id}")
         |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
         |> group(columns: ["tag_id"])
         |> sort(columns: ["_time"])
@@ -524,22 +496,24 @@ def obter_dados_auditoria(
         from(bucket: "{INFLUX_BUCKET}")
         |> range(start: {inicio_safe}, stop: {fim_safe})
         |> filter(fn: (r) => r["_measurement"] == "evento_auditoria")
-        |> filter(fn: (r) => r["tenant_id"] == "{cliente_id}")
+        |> filter(fn: (r) => r["tenant_id"] == "{tenant_id}")
         |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
         |> sort(columns: ["_time"])
     """
 
     try:
-        limite_x, limite_y = _obter_limites_mapa_cliente(cliente_id)
+        # limites do mapa do cliente — usados para normalizar coordenadas (fix IMP-06)
+        limite_x, limite_y = obter_limites_mapa(tenant_id)
 
-        with InfluxDBClient(url=INFLUX_URL, token=INFLUX_TOKEN, org=INFLUX_ORG) as client:
-            qa = client.query_api()
-            resultado = qa.query(org=INFLUX_ORG, query=query_trajetoria)
-            resultado_eventos = qa.query(org=INFLUX_ORG, query=query_eventos_auditoria)
+        qa = get_influx_client().query_api()
+        resultado         = qa.query(org=INFLUX_ORG, query=query_trajetoria)
+        resultado_eventos = qa.query(org=INFLUX_ORG, query=query_eventos_auditoria)
 
         esparguete_pontos: list[dict] = []
         incidentes:        list[dict] = []
-        tags_processadas:  dict[str, dict] = {}
+
+        # converte registos influx e calcula kpis via kpi_engine
+        registos: list[RegistoTag] = []
 
         for table in resultado:
             for record in table.records:
@@ -547,115 +521,78 @@ def obter_dados_auditoria(
                 x_cm    = record.values.get("coord_x")
                 y_cm    = record.values.get("coord_y")
                 bateria = record.values.get("bateria")
-                status  = record.values.get("status")
                 ts      = record.values.get("_time")
 
                 if tag_id is None or x_cm is None or y_cm is None:
                     continue
 
-                x_norm = round(x_cm / LIMITE_X_CM, 5)
-                y_norm = round(y_cm / LIMITE_Y_CM, 5)
+                # normaliza com os limites do mapa do cliente
+                x_norm = round(x_cm / limite_x, 5)
+                y_norm = round(y_cm / limite_y, 5)
                 ts_iso = ts.isoformat() if ts else None
 
                 esparguete_pontos.append({"tag_id": tag_id, "x": x_norm, "y": y_norm, "t": ts_iso})
 
-                if status is not None and status != "Normal":
-                    incidentes.append({
-                        "tag_id":    tag_id,
-                        "timestamp": ts_iso,
-                        "tipo":      status,
-                        "x":         x_norm,
-                        "y":         y_norm,
-                    })
+                registos.append(RegistoTag(
+                    tag_id=tag_id,
+                    x=x_cm,
+                    y=y_cm,
+                    timestamp=ts,
+                    bateria=bateria,
+                ))
 
-                if tag_id not in tags_processadas:
-                    tags_processadas[tag_id] = {
-                        "ultimo_x": None, "ultimo_y": None, "ultimo_ts": None,
-                        "distancia_cm": 0.0,
-                        "bateria_min":   bateria if bateria is not None else 100.0,
-                        "bateria_ultima": bateria if bateria is not None else 0.0,
-                        "leituras_totais": 0, "leituras_em_movimento": 0,
-                        "tempo_ocioso_seg": 0.0,
-                    }
+        # calcula kpis por tag via motor partilhado
+        tags = calcular_kpis(registos)
 
-                kpi = tags_processadas[tag_id]
-                kpi["leituras_totais"] += 1
-
-                if bateria is not None:
-                    kpi["bateria_ultima"] = bateria
-                    if bateria < kpi["bateria_min"]:
-                        kpi["bateria_min"] = bateria
-
-                if kpi["ultimo_x"] is not None:
-                    dist = math.sqrt(
-                        (x_cm - kpi["ultimo_x"]) ** 2 +
-                        (y_cm - kpi["ultimo_y"]) ** 2
-                    )
-                    kpi["distancia_cm"] += dist
-                    if dist > LIMIAR_MOVIMENTO_CM:
-                        kpi["leituras_em_movimento"] += 1
-                    elif kpi["ultimo_ts"] is not None and ts is not None:
-                        kpi["tempo_ocioso_seg"] += max((ts - kpi["ultimo_ts"]).total_seconds(), 0)
-
-                kpi["ultimo_x"]  = x_cm
-                kpi["ultimo_y"]  = y_cm
-                kpi["ultimo_ts"] = ts
-
-        # conta alertas por tag
-        alertas_por_tag = Counter(inc["tag_id"] for inc in incidentes)
-
-        kpis_por_tag = []
-        distancia_frota_m    = 0.0
-        baterias_para_media: list[float] = []
-
-        for tag_id, kpi in tags_processadas.items():
-            distancia_m = round(kpi["distancia_cm"] / 100, 2)
-            distancia_frota_m += distancia_m
-
-            oee_perc = 0.0
-            if kpi["leituras_totais"] > 0:
-                oee_perc = round(
-                    (kpi["leituras_em_movimento"] / kpi["leituras_totais"]) * 100, 1
-                )
-
-            bateria_min = round(kpi["bateria_min"], 1) if kpi["bateria_min"] < 100.0 else 0.0
-            if kpi["bateria_ultima"] > 0:
-                baterias_para_media.append(kpi["bateria_ultima"])
-
-            kpis_por_tag.append({
-                "tag_id":           tag_id,
-                "distancia_m":      distancia_m,
-                "oee_perc":         oee_perc,
-                "bateria_min_perc": bateria_min,
-                "tempo_ocioso_min": round(kpi["tempo_ocioso_seg"] / 60, 1),
-                "num_alertas":      alertas_por_tag[tag_id],
-            })
-
-        kpis_por_tag.sort(key=lambda t: t["tag_id"])
-
+        # agrega eventos de auditoria — fonte exclusiva de incidentes
+        # (evita duplicacao com o campo status da measurement posicao_tag)
+        incidentes: list[dict] = []
         try:
-            eventos_audit = _eventos_auditoria_influx_para_incidentes(
+            incidentes = _eventos_auditoria_influx_para_incidentes(
                 resultado_eventos, limite_x, limite_y
             )
-            incidentes.extend(eventos_audit)
         except Exception:
             logger.exception("falha ao agregar eventos evento_auditoria do influx")
 
         incidentes.sort(key=lambda x: x.get("timestamp", ""))
 
+        # conta alertas por tag apos consolidacao completa dos incidentes
+        alertas_por_tag = Counter(inc["tag_id"] for inc in incidentes)
+
+        distancia_frota_m    = 0.0
+        baterias_para_media: list[float] = []
+
+        kpis_por_tag = []
+        for tag_id, kpi in tags.items():
+            distancia_frota_m += kpi.distancia_m
+            if kpi.bateria_ultima > 0:
+                baterias_para_media.append(kpi.bateria_ultima)
+
+            kpis_por_tag.append({
+                "tag_id":           tag_id,
+                "distancia_m":      kpi.distancia_m,
+                "oee_perc":         kpi.taxa_utilizacao_perc,
+                "bateria_min_perc": kpi.bateria_min_perc,
+                "tempo_ocioso_min": round(kpi.tempo_ocioso_seg / 60, 1),
+                "num_alertas":      alertas_por_tag[tag_id],
+            })
+
+        kpis_por_tag.sort(key=lambda t: t["tag_id"])
+
         bateria_media_frota = 0.0
         if baterias_para_media:
             bateria_media_frota = round(sum(baterias_para_media) / len(baterias_para_media), 1)
 
+
         return {
             "sucesso":  True,
-            "cliente":  cliente_id,
+            "tenant_id": tenant_id,
             "periodo":  {"inicio": inicio, "fim": fim},
             "kpis_frota": {
                 "distancia_total_m":  round(distancia_frota_m, 2),
                 "bateria_media_perc": bateria_media_frota,
                 "total_incidentes":   len(incidentes),
-                "tags_ativas":        len(tags_processadas),
+                "tags_ativas":        len(tags),
             },
             "kpis_por_tag":      kpis_por_tag,
             "esparguete_pontos": esparguete_pontos,

@@ -8,14 +8,11 @@ import json
 import time
 
 import websockets
-from influxdb_client import InfluxDBClient, Point  # type: ignore
-from influxdb_client.client.write_api import SYNCHRONOUS
+from influxdb_client.client.write_api import SYNCHRONOUS  # type: ignore
 
 from config import (
-    INFLUX_URL,
-    INFLUX_TOKEN,
-    INFLUX_ORG,
     INFLUX_BUCKET,
+    INFLUX_ORG,
     LIMITE_X_CM,
     LIMITE_Y_CM,
     TIMEOUT_MOVIMENTO,
@@ -24,17 +21,20 @@ from config import (
     PORTA_DMATEK,
     ENDPOINT_DMATEK,
 )
-from shared import carregar_matriz_clientes
+from services.database import carregar_matriz_clientes
+from services.influx_client import get_influx_client
 
-# configuracao do influxdb
-_influx_client = InfluxDBClient(url=INFLUX_URL, token=INFLUX_TOKEN, org=INFLUX_ORG)  # type: ignore
-_write_api     = _influx_client.write_api(write_options=SYNCHRONOUS)
+# write api sincrona (delegada para thread via asyncio.to_thread)
+_write_api = get_influx_client().write_api(write_options=SYNCHRONOUS)
 
 # estado em memoria
 registo_de_tags: dict[str, dict] = {}
 
-# matriz de tags e clientes
+# mapeamento tag_id -> tenant_id (recarregado periodicamente)
 MATRIZ_CLIENTES: dict[str, str] = carregar_matriz_clientes()
+
+# intervalo de recarga do mapeamento em segundos
+_MATRIZ_RELOAD_INTERVAL_SEG = 300
 
 
 # log de eventos criticos (measurement dedicada no influx — ver api /relatorio/dados)
@@ -48,7 +48,8 @@ async def escrever_evento_auditoria(
     coord_x: float | None = None,
     coord_y: float | None = None,
 ) -> None:
-    """grava evento de auditoria (offline, recovery, emergência) no bucket influx."""
+    """grava evento de auditoria (offline, recovery, emergência) no bucket influx"""
+    from influxdb_client import Point  # type: ignore
     tenant_id = MATRIZ_CLIENTES.get(tag_id, "cliente_desconhecido")
     texto = (descricao or "")[:1024] or "-"
     ponto = (
@@ -72,6 +73,7 @@ async def escrever_evento_auditoria(
 
 # rotinas de verificacao de saude
 
+
 async def monitorizar_saude() -> None:
     """tarefa paralela que detecta tags offline"""
     while True:
@@ -89,10 +91,22 @@ async def monitorizar_saude() -> None:
         await asyncio.sleep(2)
 
 
+async def recarregar_matriz_periodicamente() -> None:
+    """recarrega mapeamento tag→tenant de 5 em 5 minutos — reconhece novas tags sem reiniciar"""
+    global MATRIZ_CLIENTES
+    while True:
+        await asyncio.sleep(_MATRIZ_RELOAD_INTERVAL_SEG)
+        nova = carregar_matriz_clientes()
+        if nova:
+            MATRIZ_CLIENTES = nova
+            print(f"[INFO] Matriz recarregada: {len(MATRIZ_CLIENTES)} tag(s).")
+
+
 # comunicacao principal
 
-async def escrever_influx(ponto: Point) -> None:
-    """delega a escrita síncrona do influx para thread paralela"""
+
+async def escrever_influx(ponto) -> None:
+    """delega a escrita sincrona do influx para thread paralela"""
     await asyncio.to_thread(
         _write_api.write,
         bucket=INFLUX_BUCKET,
@@ -103,6 +117,7 @@ async def escrever_influx(ponto: Point) -> None:
 
 async def escutar_fabrica() -> None:
     """ouve o websocket dmatek e grava coordenadas no influxdb"""
+    from influxdb_client import Point  # type: ignore
     uri = f"ws://{IP_SERVIDOR_DMATEK}:{PORTA_DMATEK}{ENDPOINT_DMATEK}"
     print(f"[INFO] Válvula de dados aberta em: {uri}")
 
@@ -186,8 +201,13 @@ async def escutar_fabrica() -> None:
 
 # arranque da aplicacao
 
+
 async def main() -> None:
-    await asyncio.gather(escutar_fabrica(), monitorizar_saude())
+    await asyncio.gather(
+        escutar_fabrica(),
+        monitorizar_saude(),
+        recarregar_matriz_periodicamente(),
+    )
 
 
 if __name__ == "__main__":

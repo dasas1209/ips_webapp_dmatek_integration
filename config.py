@@ -42,8 +42,10 @@ IP_SERVIDOR_DMATEK = "172.16.0.201"
 PORTA_DMATEK       = "5002"
 ENDPOINT_DMATEK    = "/TagPosition"
 
-# origens permitidas para cors
-ALLOWED_ORIGINS = [
-    "http://localhost:8000",
-    "http://127.0.0.1:8000",
-]
+# origens permitidas para cors — configuravel via CORS_ORIGINS no .env (valores separados por virgula)
+# ex: CORS_ORIGINS=http://localhost:8000,https://rtls.metric4.pt
+_cors_env = os.getenv("CORS_ORIGINS", "")
+ALLOWED_ORIGINS: list[str] = (
+    [o.strip() for o in _cors_env.split(",") if o.strip()]
+    or ["http://localhost:8000", "http://127.0.0.1:8000"]
+)

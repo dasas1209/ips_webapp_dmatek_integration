@@ -1,4 +1,4 @@
-﻿const cfg = window.RUNTIME_CONFIG || {};
+const cfg = window.RUNTIME_CONFIG || {};
 const LIMITE_X_CM = cfg.map?.limiteXcm ?? 760;
 const LIMITE_Y_CM = cfg.map?.limiteYcm ?? 500;
 const MAX_RASTO_PONTOS = cfg.map?.maxRastoPontos ?? 5000;
@@ -185,7 +185,7 @@ async function obterPosicoes() {
         setOverlayState("");
         els.estadoLigacao.textContent = `Ligado. Última atualização: ${new Date().toLocaleTimeString("pt-PT")}`;
 
-        if (pacoteDados.cliente && pacoteDados.cliente !== state.tenant) {
+        if (pacoteDados.tenant_id && pacoteDados.tenant_id !== state.tenant) {
             setOverlayState("Tenant de sessão inconsistente.");
             els.estadoLigacao.textContent = "A terminar sessão por segurança.";
             fazerLogout();
