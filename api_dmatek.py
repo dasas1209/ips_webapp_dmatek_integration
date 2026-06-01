@@ -8,12 +8,13 @@ import sqlite3
 import time
 from collections import Counter
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from threading import Lock
 from typing import List, Optional
 import uuid
 from pydantic import BaseModel
 
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request
+from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
@@ -60,32 +61,65 @@ app.add_middleware(
 
 app.mount("/static", StaticFiles(directory="frontend"), name="static")
 
+# versão das rotas de perfil do tenant (health check no frontend)
+API_BUILD_ID = "2026-06-01-tenant-profile"
+
+
+@app.on_event("startup")
+async def _log_startup() -> None:
+    tenant_routes = sorted(
+        r.path for r in app.routes
+        if hasattr(r, "path") and isinstance(r.path, str) and r.path.startswith("/api/tenant/")
+    )
+    logger.info("API build %s | rotas tenant: %s", API_BUILD_ID, tenant_routes)
+
+
+@app.get("/api/health", include_in_schema=False)
+def api_health():
+    """permite ao frontend confirmar que a API em execução inclui as rotas de perfil."""
+    return {"ok": True, "build": API_BUILD_ID, "tenant_profile_api": True}
+
 # logging de seguranca (sem coordenadas para minimizar exposição de localização)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("metric4.api")
 
+# avatares de clientes (ficheiro: {tenant_id}.<ext>, URL em clientes.logo_url)
+AVATARS_FS_DIR = Path(__file__).parent / "frontend" / "assets" / "imgs" / "avatars"
+AVATARS_URL_PREFIX = "/static/assets/imgs/avatars/"
+ALLOWED_AVATAR_MIME = {"image/png", "image/jpeg", "image/webp"}
+ALLOWED_AVATAR_EXT = {".png", ".jpg", ".jpeg", ".webp"}
+MAX_AVATAR_BYTES = 2 * 1024 * 1024
+
 
 # serving de paginas html
+
+_NO_CACHE = {"Cache-Control": "no-cache, no-store, must-revalidate"}
+
 
 @app.get("/", include_in_schema=False)
 @app.get("/app", include_in_schema=False)
 async def serve_index():
-    return FileResponse("frontend/index.html")
+    return FileResponse("frontend/index.html", headers=_NO_CACHE)
 
 
 @app.get("/relatorio.html", include_in_schema=False)
 async def serve_relatorio():
-    return FileResponse("frontend/relatorio.html")
+    return FileResponse("frontend/relatorio.html", headers=_NO_CACHE)
 
 
 @app.get("/auditoria.html", include_in_schema=False)
 async def serve_auditoria():
-    return FileResponse("frontend/auditoria.html")
+    return FileResponse("frontend/auditoria.html", headers=_NO_CACHE)
 
 
 @app.get("/admin.html", include_in_schema=False)
 async def serve_admin():
-    return FileResponse("frontend/admin.html")
+    return FileResponse("frontend/admin.html", headers=_NO_CACHE)
+
+
+@app.get("/app/audit-log", include_in_schema=False)
+async def serve_audit_log():
+    return FileResponse("frontend/audit_log.html", headers=_NO_CACHE)
 
 
 # carregamento de utilizadores da base de dados
@@ -161,27 +195,48 @@ def criar_token_jwt(dados: dict) -> str:
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)  # type: ignore
 
 
-def verificar_token(token: str = Depends(oauth2_scheme)) -> str:
-    """valida jwt e devolve tenant_id (usado em rotas de dados para rate limiting)"""
+def obter_payload_token(token: str = Depends(oauth2_scheme)) -> dict:
+    """decodifica jwt e devolve payload completo"""
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])  # type: ignore
-        tenant_id: Optional[str] = payload.get("tenant_id")
-        if tenant_id is None:
+        if not payload.get("tenant_id"):
             raise HTTPException(status_code=401, detail="Token sem identificação de cliente.")
-        return tenant_id
+        return payload
     except JWTError:
         raise HTTPException(status_code=401, detail="Acesso negado: token inválido ou expirado.")
 
 
+def verificar_token(payload: dict = Depends(obter_payload_token)) -> str:
+    """devolve tenant_id do token — mantém compatibilidade com aplicar_rate_limit"""
+    return payload["tenant_id"]
+
+
 # ---------------------------------------------------------------------------
-# dependencia de administracao
+# dependencias de roles
 # ---------------------------------------------------------------------------
 
-def require_admin(tenant_id: str = Depends(verificar_token)) -> str:
-    """garante que o utilizador autenticado é o administrador do sistema."""
-    if tenant_id != ADMIN_TENANT_ID:
+def require_admin(payload: dict = Depends(obter_payload_token)) -> str:
+    """garante role=superadmin; devolve tenant_id para compatibilidade com call sites existentes"""
+    if payload.get("role") != "superadmin":
         raise HTTPException(status_code=403, detail="Acesso negado: apenas o administrador do sistema.")
-    return tenant_id
+    return payload["tenant_id"]
+
+
+def require_superadmin(payload: dict = Depends(obter_payload_token)) -> dict:
+    """garante role=superadmin; devolve payload completo."""
+    if payload.get("role") != "superadmin":
+        raise HTTPException(status_code=403, detail="Acesso negado: apenas superadmin.")
+    return payload
+
+
+def _verificar_acesso_tenant(tenant_alvo: str, payload: dict) -> None:
+    """superadmin acessa qualquer tenant; admin só acessa o próprio."""
+    role = payload.get("role")
+    if role == "superadmin":
+        return
+    if role == "admin" and payload.get("tenant_id") == tenant_alvo:
+        return
+    raise HTTPException(status_code=403, detail="Acesso negado: sem permissão para este tenant.")
 
 
 def log_audit_event(user_id: str, tenant_id: str, action: str, details: str = "") -> None:
@@ -222,50 +277,79 @@ def login(
     request: Request = None,
     background_tasks: BackgroundTasks = None,
 ):
-    """autentica utilizador e devolve jwt"""
-    # throttling por username — previne brute force
+    """autentica utilizador e devolve jwt com role (superadmin | admin | user)"""
     if not login_rate_limiter.allow(credenciais.username):
         logger.warning("Rate limit de login excedido para username=%s", credenciais.username)
         raise HTTPException(status_code=429, detail="Demasiadas tentativas de login. Aguarde 1 minuto.")
 
+    # --- tentativa 1: tabela users (role=superadmin ou role=user) ---
     utilizador = UTILIZADORES.get(credenciais.username)
-    if not utilizador:
-        raise HTTPException(status_code=401, detail="Utilizador não existe.")
-    if utilizador["password"] != credenciais.password:
-        raise HTTPException(status_code=401, detail="Password incorreta.")
+    if utilizador:
+        if utilizador["password"] != credenciais.password:
+            raise HTTPException(status_code=401, detail="Password incorreta.")
+        tenant_id = utilizador["tenant_id"]
+        role = "superadmin" if tenant_id == ADMIN_TENANT_ID else "user"
+        subject = credenciais.username
+        tenant_nome = tenant_id
+        try:
+            with get_db_connection() as conn:
+                row = conn.execute("SELECT nome FROM clientes WHERE id = ?", (tenant_id,)).fetchone()
+                tenant_nome = row["nome"] if row else tenant_id
+        except Exception:
+            pass
+    else:
+        # --- tentativa 2: tabela clientes por nome (role=admin) ---
+        try:
+            with get_db_connection() as conn:
+                cliente = conn.execute(
+                    "SELECT id, nome FROM clientes WHERE nome = ? AND password = ?",
+                    (credenciais.username, credenciais.password),
+                ).fetchone()
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Erro interno no login: {exc}")
 
-    tenant_id = utilizador["tenant_id"]
+        if not cliente:
+            raise HTTPException(status_code=401, detail="Utilizador não existe.")
 
-    # valida tenant_id antes de assinar o jwt — previne flux injection
+        # o cliente_admin só autentica via tabela users — impede escalada de privilégios
+        if cliente["id"] == ADMIN_TENANT_ID:
+            raise HTTPException(
+                status_code=403,
+                detail="O cliente administrador autentica via conta de utilizador.",
+            )
+
+        tenant_id = cliente["id"]
+        role = "admin"
+        subject = credenciais.username
+        tenant_nome = cliente["nome"]
+
     if not validar_tenant_id(tenant_id):
         logger.error("tenant_id invalido detectado no login: user=%s", credenciais.username)
         raise HTTPException(status_code=400, detail="Identificador de cliente inválido.")
 
-    # obter o nome amigavel do cliente
+    logger.info("Login bem-sucedido: user=%s tenant_id=%s role=%s", subject, tenant_id, role)
+    background_tasks.add_task(log_audit_event, subject, tenant_id, "login", f"role={role}")
+
+    logo_url = None
     try:
         with get_db_connection() as conn:
-            cliente_row = conn.execute("SELECT nome FROM clientes WHERE id = ?", (tenant_id,)).fetchone()
-            tenant_nome = cliente_row["nome"] if cliente_row else tenant_id
+            row_logo = conn.execute(
+                "SELECT logo_url FROM clientes WHERE id = ?", (tenant_id,)
+            ).fetchone()
+            logo_url = row_logo["logo_url"] if row_logo else None
     except Exception:
-        tenant_nome = tenant_id
+        pass
 
-    is_admin = tenant_id == ADMIN_TENANT_ID
-    logger.info("Login bem-sucedido para user=%s tenant_id=%s is_admin=%s", credenciais.username, tenant_id, is_admin)
-    background_tasks.add_task(
-        log_audit_event,
-        credenciais.username,
-        tenant_id,
-        "login",
-        "Login bem-sucedido",
-    )
-    token = criar_token_jwt({"sub": credenciais.username, "tenant_id": tenant_id})
+    token = criar_token_jwt({"sub": subject, "tenant_id": tenant_id, "role": role})
     return {
-        "access_token":  token,
-        "token_type":    "bearer",
-        "tenant_id":     tenant_id,
-        "tenant_nome":   tenant_nome,
-        "is_admin":      is_admin,
-        "mensagem":      f"Bem-vindo, {credenciais.username}.",
+        "access_token": token,
+        "token_type":   "bearer",
+        "tenant_id":    tenant_id,
+        "tenant_nome":  tenant_nome,
+        "logo_url":     logo_url,
+        "role":         role,
+        "is_admin":     role == "superadmin",  # retro-compatibilidade com frontend atual
+        "mensagem":     f"Bem-vindo, {subject}.",
     }
 
 
@@ -789,7 +873,8 @@ def obter_mapas_utilizador(tenant_id: str = Depends(aplicar_rate_limit)):
         raise HTTPException(status_code=500, detail=f"erro ao obter mapas: {exc}")
 
 @app.get("/api/admin/config/{tenant_id}", tags=["Admin"])
-def admin_get_config(tenant_id: str, _: str = Depends(require_admin)):
+def admin_get_config(tenant_id: str, payload: dict = Depends(obter_payload_token)):
+    _verificar_acesso_tenant(tenant_id, payload)
     """obtem configuracoes de mapas, tags e utilizadores de um tenant."""
     try:
         with get_db_connection() as conn:
@@ -826,8 +911,10 @@ def admin_get_config(tenant_id: str, _: str = Depends(require_admin)):
 def admin_create_mapa(
     data: MapaCreate,
     background_tasks: BackgroundTasks,
-    admin_tenant: str = Depends(require_admin),
+    payload: dict = Depends(obter_payload_token),
 ):
+    _verificar_acesso_tenant(data.tenant_id, payload)
+    admin_tenant = payload["tenant_id"]
     try:
         with get_db_connection() as conn:
             conn.execute(
@@ -848,13 +935,15 @@ def admin_update_mapa(
     map_id: int,
     data: MapaUpdate,
     background_tasks: BackgroundTasks,
-    admin_tenant: str = Depends(require_admin),
+    payload: dict = Depends(obter_payload_token),
 ):
+    admin_tenant = payload["tenant_id"]
     try:
         with get_db_connection() as conn:
             row = conn.execute("SELECT cliente_id, nome, limite_x, limite_y, ficheiro_img FROM mapas WHERE id = ?", (map_id,)).fetchone()
             if not row:
                 raise HTTPException(status_code=404, detail="Mapa não encontrado.")
+            _verificar_acesso_tenant(row["cliente_id"], payload)
             conn.execute(
                 "UPDATE mapas SET nome = ?, limite_x = ?, limite_y = ?, ficheiro_img = ? WHERE id = ?",
                 (data.nome, data.limite_x, data.limite_y, data.ficheiro_img, map_id)
@@ -878,13 +967,15 @@ def admin_update_mapa(
 def admin_delete_mapa(
     map_id: int,
     background_tasks: BackgroundTasks,
-    admin_tenant: str = Depends(require_admin),
+    payload: dict = Depends(obter_payload_token),
 ):
+    admin_tenant = payload["tenant_id"]
     try:
         with get_db_connection() as conn:
             row = conn.execute("SELECT cliente_id, nome FROM mapas WHERE id = ?", (map_id,)).fetchone()
             if not row:
                 raise HTTPException(status_code=404, detail="Mapa não encontrado.")
+            _verificar_acesso_tenant(row["cliente_id"], payload)
             conn.execute("DELETE FROM ancoras WHERE mapa_id = ?", (map_id,))
             conn.execute("DELETE FROM mapas WHERE id = ?", (map_id,))
             conn.commit()
@@ -902,16 +993,25 @@ def admin_delete_mapa(
 def admin_update_aliases(
     data: TagAliasesUpdate,
     background_tasks: BackgroundTasks,
-    admin_tenant: str = Depends(require_admin),
+    payload: dict = Depends(obter_payload_token),
 ):
     """atualiza os aliases das tags"""
+    if payload.get("role") not in ("superadmin", "admin"):
+        raise HTTPException(status_code=403, detail="Acesso negado.")
+    admin_tenant = payload["tenant_id"]
     try:
         with get_db_connection() as conn:
             for tag in data.tags:
-                conn.execute(
-                    "UPDATE tags SET nome = ? WHERE id_fisico = ?",
-                    (tag.friendly_name, tag.tag_id)
-                )
+                if payload.get("role") == "admin":
+                    conn.execute(
+                        "UPDATE tags SET nome = ? WHERE id_fisico = ? AND cliente_id = ?",
+                        (tag.friendly_name, tag.tag_id, admin_tenant),
+                    )
+                else:
+                    conn.execute(
+                        "UPDATE tags SET nome = ? WHERE id_fisico = ?",
+                        (tag.friendly_name, tag.tag_id),
+                    )
             conn.commit()
         aliases_log = ", ".join([f"[{t.tag_id} -> '{t.friendly_name}']" for t in data.tags])
         background_tasks.add_task(
@@ -998,8 +1098,10 @@ def admin_delete_tenant(tenant_id: str, background_tasks: BackgroundTasks, admin
 def admin_create_user(
     data: UserCreate,
     background_tasks: BackgroundTasks,
-    admin_tenant: str = Depends(require_admin),
+    payload: dict = Depends(obter_payload_token),
 ):
+    _verificar_acesso_tenant(data.tenant_id, payload)
+    admin_tenant = payload["tenant_id"]
     try:
         with get_db_connection() as conn:
             existing_user = conn.execute(
@@ -1028,14 +1130,16 @@ def admin_create_user(
         raise HTTPException(status_code=500, detail=f"erro: {exc}")
 
 @app.put("/api/admin/users/{username}", tags=["Admin"])
-def admin_update_user(username: str, data: UserUpdate, background_tasks: BackgroundTasks, admin_tenant: str = Depends(require_admin)):
+def admin_update_user(username: str, data: UserUpdate, background_tasks: BackgroundTasks, payload: dict = Depends(obter_payload_token)):
     if username == ADMIN_USERNAME and data.new_username and data.new_username != ADMIN_USERNAME:
         raise HTTPException(status_code=400, detail="Não pode alterar o username da conta admin principal.")
+    admin_tenant = payload["tenant_id"]
     try:
         with get_db_connection() as conn:
             db_user = conn.execute("SELECT password, cliente_id FROM users WHERE username = ?", (username,)).fetchone()
             if not db_user:
                 raise HTTPException(status_code=404, detail="Utilizador não encontrado.")
+            _verificar_acesso_tenant(db_user["cliente_id"], payload)
             if data.new_username and data.new_username != username:
                 existing_user = conn.execute(
                     "SELECT u.username, c.nome as cliente_nome FROM users u JOIN clientes c ON u.cliente_id = c.id WHERE u.username = ?",
@@ -1067,15 +1171,17 @@ def admin_update_user(username: str, data: UserUpdate, background_tasks: Backgro
 def admin_delete_user(
     username: str,
     background_tasks: BackgroundTasks,
-    admin_tenant: str = Depends(require_admin),
+    payload: dict = Depends(obter_payload_token),
 ):
     if username == ADMIN_USERNAME:
         raise HTTPException(status_code=400, detail="Não pode apagar a conta admin.")
+    admin_tenant = payload["tenant_id"]
     try:
         with get_db_connection() as conn:
             row = conn.execute("SELECT cliente_id FROM users WHERE username = ?", (username,)).fetchone()
             if not row:
                 raise HTTPException(status_code=404, detail="Utilizador não encontrado.")
+            _verificar_acesso_tenant(row["cliente_id"], payload)
             conn.execute("DELETE FROM users WHERE username = ?", (username,))
             conn.commit()
             global UTILIZADORES
@@ -1094,8 +1200,10 @@ def admin_delete_user(
 def admin_create_tag(
     data: TagCreate,
     background_tasks: BackgroundTasks,
-    admin_tenant: str = Depends(require_admin),
+    payload: dict = Depends(obter_payload_token),
 ):
+    _verificar_acesso_tenant(data.tenant_id, payload)
+    admin_tenant = payload["tenant_id"]
     try:
         with get_db_connection() as conn:
             conn.execute(
@@ -1117,13 +1225,15 @@ def admin_create_tag(
 def admin_delete_tag(
     tag_id: str,
     background_tasks: BackgroundTasks,
-    admin_tenant: str = Depends(require_admin),
+    payload: dict = Depends(obter_payload_token),
 ):
+    admin_tenant = payload["tenant_id"]
     try:
         with get_db_connection() as conn:
             row = conn.execute("SELECT cliente_id FROM tags WHERE id_fisico = ?", (tag_id,)).fetchone()
             if not row:
                 raise HTTPException(status_code=404, detail="Tag não encontrada.")
+            _verificar_acesso_tenant(row["cliente_id"], payload)
             conn.execute("DELETE FROM tags WHERE id_fisico = ?", (tag_id,))
             conn.commit()
         background_tasks.add_task(
@@ -1137,8 +1247,154 @@ def admin_delete_tag(
         raise HTTPException(status_code=500, detail=f"erro: {exc}")
 
 # ---------------------------------------------------------------------------
-# logs de auditoria
+# logs de auditoria (InfluxDB measurement: system_access_log)
 # ---------------------------------------------------------------------------
+
+_AUDIT_LOG_INFLUX_LIMIT = 10_000
+
+
+def _parse_query_ts(val: str) -> datetime:
+    """converte parâmetro ISO8601 para datetime UTC."""
+    normalizado = val.strip().replace("Z", "+00:00")
+    dt = datetime.fromisoformat(normalizado)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _flux_time_literal(dt: datetime) -> str:
+    return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _resolver_intervalo_audit(
+    ts_inicio: Optional[str],
+    ts_fim: Optional[str],
+) -> tuple[str, str]:
+    """devolve (start, stop) para range() do Flux."""
+    if not ts_inicio and not ts_fim:
+        # sem filtro temporal: máximo histórico retido no bucket Influx
+        return "-100y", "now()"
+    if ts_inicio and ts_fim:
+        return _flux_time_literal(_parse_query_ts(ts_inicio)), _flux_time_literal(_parse_query_ts(ts_fim))
+    if ts_inicio:
+        return _flux_time_literal(_parse_query_ts(ts_inicio)), "now()"
+    fim = _parse_query_ts(ts_fim)  # type: ignore[arg-type]
+    inicio = fim - timedelta(days=LIMITE_DIAS_HISTORICO)
+    return _flux_time_literal(inicio), _flux_time_literal(fim)
+
+
+def _match_parcial_ci(valor: Optional[str], filtro: Optional[str]) -> bool:
+    if not filtro:
+        return True
+    return filtro.lower() in (valor or "").lower()
+
+
+def _carregar_system_access_log(
+    start: str,
+    stop: str,
+    tenant_id: Optional[str] = None,
+) -> list[dict]:
+    """lê eventos da measurement system_access_log (mesma fonte do histórico de sessões)."""
+    if not INFLUX_BUCKET or not INFLUX_ORG:
+        return []
+
+    tenant_filter = ""
+    if tenant_id and validar_tenant_id(tenant_id):
+        tenant_filter = f'|> filter(fn: (r) => r["tenant_id"] == "{tenant_id}")'
+
+    query = f"""
+        from(bucket: "{INFLUX_BUCKET}")
+        |> range(start: {start}, stop: {stop})
+        |> filter(fn: (r) => r["_measurement"] == "system_access_log")
+        {tenant_filter}
+        |> filter(fn: (r) => r["_field"] == "action" or r["_field"] == "details")
+        |> pivot(rowKey:["_time"], columnKey:["_field"], valueColumn:"_value")
+        |> group()
+        |> sort(columns:["_time"], desc:true)
+        |> limit(n: {_AUDIT_LOG_INFLUX_LIMIT})
+    """
+    resultados = get_influx_client().query_api().query(org=INFLUX_ORG, query=query)
+    eventos: list[dict] = []
+    for tabela in resultados:
+        for registro in tabela.records:
+            ts = registro.values.get("_time")
+            eventos.append({
+                "timestamp": ts.isoformat() if hasattr(ts, "isoformat") else str(ts),
+                "tenant_id": registro.values.get("tenant_id") or "",
+                "username": registro.values.get("user_id") or "",
+                "acao": registro.values.get("action") or "",
+                "detalhes": registro.values.get("details") or "",
+            })
+    return eventos
+
+
+@app.get("/admin/audit-log", tags=["Admin"])
+def admin_audit_log(
+    tenant_id: Optional[str] = Query(None),
+    username: Optional[str] = Query(None),
+    acao: Optional[str] = Query(None),
+    detalhes: Optional[str] = Query(None),
+    ts_inicio: Optional[str] = Query(None),
+    ts_fim: Optional[str] = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+    _: dict = Depends(require_superadmin),
+):
+    """
+    Log global de ações de utilizadores (system_access_log / InfluxDB).
+    Filtros combinados em AND; resposta vazia em caso de erro — nunca HTTP 500.
+    """
+    page_size = min(max(page_size, 1), 200)
+    try:
+        if tenant_id and not validar_tenant_id(tenant_id):
+            return {
+                "total": 0,
+                "page": page,
+                "page_size": page_size,
+                "resultados": [],
+            }
+
+        try:
+            start, stop = _resolver_intervalo_audit(ts_inicio, ts_fim)
+        except (ValueError, TypeError):
+            return {
+                "total": 0,
+                "page": page,
+                "page_size": page_size,
+                "resultados": [],
+            }
+
+        eventos = _carregar_system_access_log(start, stop, tenant_id)
+
+        filtrados = [
+            e for e in eventos
+            if _match_parcial_ci(e.get("username"), username)
+            and _match_parcial_ci(e.get("acao"), acao)
+            and _match_parcial_ci(e.get("detalhes"), detalhes)
+            and (not tenant_id or e.get("tenant_id") == tenant_id)
+        ]
+
+        total = len(filtrados)
+        offset = (page - 1) * page_size
+        pagina = filtrados[offset: offset + page_size]
+
+        return {
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "resultados": pagina,
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Falha ao consultar audit-log: %s", exc)
+        return {
+            "total": 0,
+            "page": page,
+            "page_size": page_size,
+            "resultados": [],
+        }
+
 
 @app.get("/api/admin/tenants/{tenant_id}/sessions", tags=["Admin"])
 def admin_get_tenant_sessions(
@@ -1146,9 +1402,10 @@ def admin_get_tenant_sessions(
     start: str = Query("-30d", description="Início relativo (ex: -7d) ou ISO 8601"),
     stop: str = Query("now()", description="Fim relativo ou ISO 8601"),
     action: Optional[str] = Query(None, description="Filtro opcional por tipo de ação"),
-    _: str = Depends(require_admin),
+    payload: dict = Depends(obter_payload_token),
 ):
     """logs de auditoria do sistema para um cliente específico — visíveis pelo administrador."""
+    _verificar_acesso_tenant(tenant_id, payload)
     action_filter = f'|> filter(fn: (r) => r["action"] == "{action}")' if action else ""
     query = f"""
         from(bucket: "{INFLUX_BUCKET}")
@@ -1180,6 +1437,190 @@ def admin_get_tenant_sessions(
         raise HTTPException(status_code=500, detail=f"erro ao buscar logs: {exc}")
 
 
+# perfil do cliente (conta admin da empresa — tabela clientes)
+
+def _require_tenant_admin(payload: dict) -> str:
+    if payload.get("role") != "admin":
+        raise HTTPException(
+            status_code=403,
+            detail="Apenas o administrador da empresa pode alterar estes dados.",
+        )
+    return payload["tenant_id"]
+
+
+def _cliente_row_ou_404(conn: sqlite3.Connection, tenant_id: str) -> sqlite3.Row:
+    row = conn.execute(
+        "SELECT id, nome, password, logo_url FROM clientes WHERE id = ?", (tenant_id,)
+    ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Cliente não encontrado.")
+    return row
+
+
+def _extensao_avatar_por_conteudo(conteudo: bytes, filename: str = "") -> str:
+    """detecta tipo real pela assinatura do ficheiro (fiável no Windows)."""
+    if conteudo.startswith(b"\x89PNG\r\n\x1a\n") or conteudo.startswith(b"\x89PNG"):
+        return ".png"
+    if conteudo.startswith(b"\xff\xd8"):
+        return ".jpg"
+    if len(conteudo) >= 12 and conteudo[:4] == b"RIFF" and conteudo[8:12] == b"WEBP":
+        return ".webp"
+
+    nome = (filename or "").lower()
+    if nome.endswith(".png"):
+        return ".png"
+    if nome.endswith(".webp"):
+        return ".webp"
+    if nome.endswith((".jpg", ".jpeg")):
+        return ".jpg"
+
+    raise HTTPException(
+        status_code=400,
+        detail="Formato não suportado. Envie PNG, JPEG ou WebP.",
+    )
+
+
+def _remover_ficheiros_avatar(tenant_id: str) -> None:
+    AVATARS_FS_DIR.mkdir(parents=True, exist_ok=True)
+    for ficheiro in AVATARS_FS_DIR.glob(f"{tenant_id}.*"):
+        if ficheiro.is_file():
+            ficheiro.unlink(missing_ok=True)
+
+
+def _logo_url_canonica(tenant_id: str, ext: str) -> str:
+    return f"{AVATARS_URL_PREFIX}{tenant_id}{ext}"
+
+
+@app.get("/api/tenant/branding", tags=["Tenant"])
+def obter_tenant_branding(payload: dict = Depends(obter_payload_token)):
+    """nome e avatar do tenant do utilizador autenticado (user ou admin)."""
+    tenant_id = payload["tenant_id"]
+    with get_db_connection() as conn:
+        row = _cliente_row_ou_404(conn, tenant_id)
+    return {
+        "tenant_id": row["id"],
+        "nome": row["nome"],
+        "logo_url": row["logo_url"],
+    }
+
+
+class TenantProfileUpdate(BaseModel):
+    nome: Optional[str] = None
+    new_password: Optional[str] = None
+    current_password: str
+
+
+@app.put("/api/tenant/profile", tags=["Tenant"])
+def atualizar_tenant_profile(
+    data: TenantProfileUpdate,
+    background_tasks: BackgroundTasks,
+    payload: dict = Depends(obter_payload_token),
+):
+    """admin da empresa: altera nome de exibição e password de login (tabela clientes)."""
+    tenant_id = _require_tenant_admin(payload)
+    subject = payload.get("sub", "")
+
+    if not data.nome and not data.new_password:
+        raise HTTPException(status_code=400, detail="Indica pelo menos um campo a alterar.")
+
+    with get_db_connection() as conn:
+        row = _cliente_row_ou_404(conn, tenant_id)
+        if data.current_password != row["password"]:
+            raise HTTPException(status_code=400, detail="Password atual incorreta.")
+
+        novo_nome = data.nome.strip() if data.nome else row["nome"]
+        if not novo_nome:
+            raise HTTPException(status_code=400, detail="O nome do cliente não pode estar vazio.")
+
+        nova_pass = data.new_password if data.new_password else row["password"]
+        conn.execute(
+            "UPDATE clientes SET nome = ?, password = ? WHERE id = ?",
+            (novo_nome, nova_pass, tenant_id),
+        )
+        conn.commit()
+
+    pass_mudou = "Sim" if data.new_password else "Não"
+    background_tasks.add_task(
+        log_audit_event,
+        subject,
+        tenant_id,
+        "tenant_profile_updated",
+        f"Nome: '{novo_nome}', Password alterada: {pass_mudou}.",
+    )
+    return {
+        "sucesso": True,
+        "tenant_id": tenant_id,
+        "nome": novo_nome,
+        "nome_alterado": novo_nome != row["nome"],
+    }
+
+
+@app.post("/api/tenant/profile/avatar", tags=["Tenant"])
+async def upload_tenant_avatar(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    payload: dict = Depends(obter_payload_token),
+):
+    """admin: upload de avatar — grava como {tenant_id}.<ext> e actualiza logo_url."""
+    tenant_id = _require_tenant_admin(payload)
+    subject = payload.get("sub", "")
+
+    conteudo = await file.read()
+    if len(conteudo) > MAX_AVATAR_BYTES:
+        raise HTTPException(status_code=400, detail="Imagem demasiado grande (máximo 2 MB).")
+    if len(conteudo) < 100:
+        raise HTTPException(status_code=400, detail="Ficheiro de imagem inválido ou vazio.")
+
+    ext = _extensao_avatar_por_conteudo(conteudo, file.filename or "")
+    if ext not in ALLOWED_AVATAR_EXT:
+        raise HTTPException(status_code=400, detail="Extensão de ficheiro não permitida.")
+
+    AVATARS_FS_DIR.mkdir(parents=True, exist_ok=True)
+    _remover_ficheiros_avatar(tenant_id)
+    destino = AVATARS_FS_DIR / f"{tenant_id}{ext}"
+    destino.write_bytes(conteudo)
+
+    logo_url = _logo_url_canonica(tenant_id, ext)
+    with get_db_connection() as conn:
+        _cliente_row_ou_404(conn, tenant_id)
+        conn.execute("UPDATE clientes SET logo_url = ? WHERE id = ?", (logo_url, tenant_id))
+        conn.commit()
+
+    background_tasks.add_task(
+        log_audit_event,
+        subject,
+        tenant_id,
+        "tenant_avatar_uploaded",
+        f"Avatar actualizado: {logo_url}",
+    )
+    return {"sucesso": True, "logo_url": logo_url}
+
+
+@app.delete("/api/tenant/profile/avatar", tags=["Tenant"])
+def remover_tenant_avatar(
+    background_tasks: BackgroundTasks,
+    payload: dict = Depends(obter_payload_token),
+):
+    """admin: remove avatar do disco e limpa logo_url."""
+    tenant_id = _require_tenant_admin(payload)
+    subject = payload.get("sub", "")
+
+    _remover_ficheiros_avatar(tenant_id)
+    with get_db_connection() as conn:
+        _cliente_row_ou_404(conn, tenant_id)
+        conn.execute("UPDATE clientes SET logo_url = NULL WHERE id = ?", (tenant_id,))
+        conn.commit()
+
+    background_tasks.add_task(
+        log_audit_event,
+        subject,
+        tenant_id,
+        "tenant_avatar_removed",
+        "Avatar da empresa removido.",
+    )
+    return {"sucesso": True, "logo_url": None}
+
+
 # auto-gestao de credenciais (qualquer utilizador autenticado)
 
 class SelfCredentialsUpdate(BaseModel):
@@ -1192,15 +1633,16 @@ class SelfCredentialsUpdate(BaseModel):
 def update_self_credentials(
     data: SelfCredentialsUpdate,
     background_tasks: BackgroundTasks,
-    token: str = Depends(oauth2_scheme)
+    payload: dict = Depends(obter_payload_token),
 ):
     """permite ao utilizador autenticado alterar o seu proprio username e/ou password"""
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        current_username: str = payload.get("sub")
-        if not current_username:
-            raise HTTPException(status_code=401, detail="Token invalido")
-    except JWTError:
+    if payload.get("role") == "admin":
+        raise HTTPException(
+            status_code=403,
+            detail="Conta ADMIN não tem credenciais na tabela de utilizadores.",
+        )
+    current_username: str = payload.get("sub", "")
+    if not current_username:
         raise HTTPException(status_code=401, detail="Token invalido")
 
     with get_db_connection() as conn:

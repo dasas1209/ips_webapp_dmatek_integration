@@ -99,12 +99,18 @@ async function fazerLogin(event) {
         localStorage.setItem("cracha_jwt", dados.access_token);
         localStorage.setItem("tenant_id", dados.tenant_id);
         localStorage.setItem("tenant_nome", dados.tenant_nome || dados.tenant_id);
+        if (dados.logo_url) {
+            localStorage.setItem("tenant_logo_url", dados.logo_url);
+        } else {
+            localStorage.removeItem("tenant_logo_url");
+        }
         localStorage.setItem("is_admin", dados.is_admin ? "true" : "false");
+        localStorage.setItem("role", dados.role || "user");
         localStorage.setItem("login_timestamp", new Date().toISOString());
 
         els.msgErro.textContent = "";
 
-        if (dados.is_admin) {
+        if (dados.role === "superadmin" || dados.role === "admin") {
             window.location.href = "/admin.html";
             return;
         }
@@ -127,7 +133,7 @@ async function mudarParaDashboard() {
     const utilizador = obterNomeUtilizador();
     els.topbarUser.textContent = `Utilizador: ${utilizador}`;
 
-    setTenantInfo(tenant);
+    await carregarBrandingTenant();
     setThemeTenant(tenant);
     
     await carregarMapasDoServidor();
@@ -142,19 +148,40 @@ async function mudarParaDashboard() {
     state.loopAtualizacaoKpis = setInterval(atualizarKpisDiretor, cfg.timing?.refreshKpisMs ?? 60000);
 }
 
-function setTenantInfo(tenant) {
+function setTenantInfo(tenant, nomeOverride, logoOverride) {
     state.tenant = tenant;
-    const tenantNome = localStorage.getItem("tenant_nome") || tenant;
-    const iniciais = tenantNome
-        .replace(/_/g, " ")
-        .split(/\s+/)
-        .filter(Boolean)
-        .slice(0, 2)
-        .map((p) => p[0]?.toUpperCase() || "")
-        .join("") || "M4";
+    const tenantNome = nomeOverride || localStorage.getItem("tenant_nome") || tenant;
+    const logoUrl = logoOverride !== undefined
+        ? logoOverride
+        : (localStorage.getItem("tenant_logo_url") || null);
 
     els.tenantNameSidebar.textContent = tenantNome;
-    els.tenantAvatar.textContent = iniciais;
+    if (window.ASSET_PATHS?.aplicarAvatarElemento) {
+        window.ASSET_PATHS.aplicarAvatarElemento(els.tenantAvatar, tenantNome, logoUrl);
+    } else {
+        els.tenantAvatar.textContent = tenantNome.slice(0, 2).toUpperCase();
+    }
+}
+
+async function carregarBrandingTenant() {
+    const token = obterToken();
+    if (!token) return;
+    try {
+        const resp = await fetch("/api/tenant/branding", {
+            headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!resp.ok) return;
+        const dados = await resp.json();
+        localStorage.setItem("tenant_nome", dados.nome || dados.tenant_id);
+        if (dados.logo_url) {
+            localStorage.setItem("tenant_logo_url", dados.logo_url);
+        } else {
+            localStorage.removeItem("tenant_logo_url");
+        }
+        setTenantInfo(dados.tenant_id, dados.nome, dados.logo_url || null);
+    } catch {
+        /* mantém cache local */
+    }
 }
 
 function fazerLogout() {
@@ -175,6 +202,8 @@ function fazerLogout() {
     localStorage.removeItem("tenant_id");
     localStorage.removeItem("tenant_nome");
     localStorage.removeItem("is_admin");
+    localStorage.removeItem("role");
+    localStorage.removeItem("tenant_logo_url");
     localStorage.removeItem("login_timestamp");
 
     els.dashboard.classList.add("escondido");
@@ -720,10 +749,12 @@ function carregarImagemDoMapaAtivo() {
     }
     
     let caminho = state.mapaAtivo.path;
-    if (caminho.startsWith('frontend/')) {
-        caminho = caminho.replace('frontend/', '/static/');
-    } else if (!caminho.startsWith('/')) {
-        caminho = '/' + caminho;
+    if (window.ASSET_PATHS) {
+        caminho = window.ASSET_PATHS.normalizarCaminhoImagem(caminho);
+    } else if (caminho.startsWith("frontend/")) {
+        caminho = caminho.replace("frontend/", "/static/");
+    } else if (!caminho.startsWith("/")) {
+        caminho = "/" + caminho;
     }
 
     if (state.imagemMapa.src.includes(caminho)) return;
@@ -738,11 +769,11 @@ window.addEventListener("load", async () => {
 
     const token = obterToken();
     if (token) {
-        if (isAdminToken()) {
+        const role = obterRole();
+        if (role === "superadmin" || role === "admin") {
             window.location.href = "/admin.html";
             return;
         }
-
         await mudarParaDashboard();
     }
 });

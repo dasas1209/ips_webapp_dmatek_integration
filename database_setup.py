@@ -216,30 +216,97 @@ def seed_from_csvs(conn: sqlite3.Connection) -> None:
 
 
 # ---------------------------------------------------------------------------
+# migração de caminhos de imagens (assets reorganizados)
+# ---------------------------------------------------------------------------
+
+def _normalizar_path_mapa(path: str) -> str:
+    """converte caminhos legados para /static/assets/imgs/maps/<ficheiro>."""
+    if not path:
+        return path
+    p = path.strip().replace("\\", "/")
+    if p.startswith("/static/assets/imgs/maps/"):
+        return p
+    if "metric-logo" in p:
+        return "/static/assets/imgs/metric-logo.svg"
+    nome = p.split("/")[-1]
+    if nome and "." in nome:
+        return f"/static/assets/imgs/maps/{nome}"
+    return p
+
+
+def migrate_asset_paths(conn: sqlite3.Connection) -> None:
+    """actualiza ficheiro_img e logo_url para a nova estrutura de pastas."""
+    alterados = 0
+    for row in conn.execute(
+        "SELECT id, ficheiro_img FROM mapas WHERE ficheiro_img IS NOT NULL AND ficheiro_img != ''"
+    ).fetchall():
+        novo = _normalizar_path_mapa(row["ficheiro_img"])
+        if novo != row["ficheiro_img"]:
+            conn.execute("UPDATE mapas SET ficheiro_img = ? WHERE id = ?", (novo, row["id"]))
+            alterados += 1
+
+    for row in conn.execute(
+        "SELECT id, logo_url FROM clientes WHERE logo_url IS NOT NULL AND logo_url != ''"
+    ).fetchall():
+        url = row["logo_url"].strip().replace("\\", "/")
+        if "metric-logo" in url:
+            novo = "/static/assets/imgs/metric-logo.svg"
+        elif url.startswith("/static/assets/imgs/avatars/"):
+            novo = url
+        elif url.startswith("/static/assets/avatars/"):
+            novo = url.replace("/static/assets/avatars/", "/static/assets/imgs/avatars/")
+        elif url.startswith("frontend/assets/imgs/avatars/"):
+            novo = url.replace("frontend/", "/static/")
+        elif url.startswith("frontend/assets/avatars/"):
+            novo = url.replace("frontend/assets/avatars/", "/static/assets/imgs/avatars/")
+        elif "/" in url:
+            nome = url.split("/")[-1]
+            novo = f"/static/assets/imgs/avatars/{nome}"
+        else:
+            novo = f"/static/assets/imgs/avatars/{url}"
+        if novo != row["logo_url"]:
+            conn.execute("UPDATE clientes SET logo_url = ? WHERE id = ?", (novo, row["id"]))
+            alterados += 1
+
+    if alterados:
+        conn.commit()
+        logger.info("caminhos de imagens migrados: %s registo(s).", alterados)
+
+
+# ---------------------------------------------------------------------------
 # admin idempotente
 # ---------------------------------------------------------------------------
 
 def ensure_admin(conn: sqlite3.Connection) -> None:
     """
     garante que existe um cliente admin e um user administrador configurado por ambiente.
-    idempotente — nao duplica se ja existir.
+    idempotente — faz apenas leitura se ambos os registos já existirem, evitando
+    lock de escrita quando a API está simultaneamente em execução.
     """
-    conn.execute(
-        "INSERT OR IGNORE INTO clientes (id, nome) VALUES (?, ?)",
-        (ADMIN_TENANT_ID, "Administrador"),
-    )
-    conn.execute(
-        "INSERT OR IGNORE INTO users (username, password, cliente_id) VALUES (?, ?, ?)",
-        (ADMIN_USERNAME, ADMIN_PASSWORD, ADMIN_TENANT_ID),
-    )
-    conn.commit()
-
-    # log diferenciado: admin criado ou ja existia
-    admin = conn.execute(
-        "SELECT id FROM users WHERE username = ?", (ADMIN_USERNAME,)
+    cliente_existe = conn.execute(
+        "SELECT 1 FROM clientes WHERE id = ?", (ADMIN_TENANT_ID,)
     ).fetchone()
-    if admin:
-        logger.info("utilizador admin verificado (id=%s).", admin["id"])
+    user_existe = conn.execute(
+        "SELECT 1 FROM users WHERE username = ?", (ADMIN_USERNAME,)
+    ).fetchone()
+
+    if cliente_existe and user_existe:
+        logger.info("admin verificado — sem alteracoes necessarias.")
+        return
+
+    # só chega aqui na primeira execucao ou se os registos foram apagados
+    if not cliente_existe:
+        conn.execute(
+            "INSERT INTO clientes (id, nome) VALUES (?, ?)",
+            (ADMIN_TENANT_ID, "Administrador"),
+        )
+    if not user_existe:
+        conn.execute(
+            "INSERT INTO users (username, password, cliente_id) VALUES (?, ?, ?)",
+            (ADMIN_USERNAME, ADMIN_PASSWORD, ADMIN_TENANT_ID),
+        )
+    conn.commit()
+    logger.info("admin criado com sucesso.")
 
 
 # ---------------------------------------------------------------------------
@@ -268,20 +335,32 @@ def main() -> None:
         logger.error("nao foi possivel abrir a base de dados: %s", exc)
         raise SystemExit(1) from exc
 
-    with conn:
-        create_tables(conn)
+    try:
+        with conn:
+            create_tables(conn)
 
-        if check_db_initialized(conn):
-            logger.info("Database OK — seeding ignorado.")
+            if check_db_initialized(conn):
+                logger.info("Database OK — seeding ignorado.")
+            else:
+                seed_from_csvs(conn)
+                delete_csvs()
+                logger.info("Database seeded com sucesso.")
+
+            # admin e sempre verificado (independente do seeding)
+            ensure_admin(conn)
+            migrate_asset_paths(conn)
+
+    except sqlite3.OperationalError as exc:
+        if "database is locked" in str(exc).lower():
+            # API já em execução com a BD aberta — se o setup chegou até aqui,
+            # a BD já foi inicializada em sessões anteriores. Termina com sucesso.
+            logger.info("BD em uso por outro processo — assumindo ja inicializada. Setup ignorado.")
         else:
-            seed_from_csvs(conn)
-            delete_csvs()
-            logger.info("Database seeded com sucesso.")
+            logger.error("Erro inesperado na BD: %s", exc)
+            raise SystemExit(1) from exc
+    finally:
+        conn.close()
 
-        # admin e sempre verificado (independente do seeding)
-        ensure_admin(conn)
-
-    conn.close()
     logger.info("=== Setup concluido ===")
 
 

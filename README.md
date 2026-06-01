@@ -48,8 +48,10 @@ Stack: Python 3.11+ · FastAPI · InfluxDB Cloud · SQLite3 · HTML/JS/CSS
     ├── relatorio.js            # lógica dos relatórios: fetch /kpis · renderização Chart.js
     ├── auditoria.js            # lógica da auditoria: fetch /relatorio/dados · esparguete canvas · exportação PNG/PDF
     └── assets/
-        ├── metric-logo.svg     # logotipo Metric4
-        └── mapa_cliente_A.png  # imagem de fundo do mapa do cliente A
+        └── imgs/
+            ├── metric-logo.svg       # logotipo Metric4
+            ├── maps/                 # plantas por cliente (ex: mapa_cliente_A.png)
+            └── avatars/              # avatares de tenant/utilizador (opcional)
 ```
 
 ---

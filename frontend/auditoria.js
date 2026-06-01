@@ -38,7 +38,7 @@ function carregarLogo() {
             resolve(true);
         };
         imagemLogoMetric4.onerror = () => resolve(false);
-        imagemLogoMetric4.src = "/static/assets/metric-logo.svg";
+        imagemLogoMetric4.src = (window.ASSET_PATHS && window.ASSET_PATHS.LOGO) || "/static/assets/imgs/metric-logo.svg";
     });
 }
 
@@ -195,7 +195,9 @@ function renderizarEsparguetePreview(dados) {
     canvas.height = rect.height || 320;
     const ctx = canvas.getContext("2d");
 
-    const mapaPath = `/static/assets/mapa_${dados.tenant_id}.png`;
+    const mapaPath = window.ASSET_PATHS
+        ? window.ASSET_PATHS.mapaFallbackTenant(dados.tenant_id)
+        : `/static/assets/imgs/maps/mapa_${dados.tenant_id}.png`;
     if (!imagemMapaAuditoria.src.includes(mapaPath)) {
         imagemMapaAuditoria.src = mapaPath;
         imagemMapaAuditoria.onload = () => desenharEsparguete(ctx, canvas, dados);

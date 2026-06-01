@@ -153,12 +153,36 @@ h1,h2,h3,p { margin: 0; }
 .tenant-avatar {
     width: 52px;
     height: 52px;
+    min-width: 52px;
+    max-width: 52px;
+    max-height: 52px;
     border-radius: 50%;
     background: linear-gradient(135deg, var(--tenant-primary), #7c3aed);
     color: #fff;
-    display: grid;
-    place-items: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     font-weight: 700;
+    overflow: hidden;
+    flex-shrink: 0;
+    position: relative;
+    box-sizing: border-box;
+}
+
+.tenant-avatar.tenant-avatar--img {
+    background: var(--surface-2);
+    padding: 0;
+}
+
+.tenant-avatar img {
+    width: 100% !important;
+    height: 100% !important;
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: cover;
+    display: block;
+    position: absolute;
+    inset: 0;
 }
 .tenant-branding h2 { font-size: 17px; margin-top: 4px; }
 

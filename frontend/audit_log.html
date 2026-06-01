@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="pt-PT">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Log de Ações — Metric4 RTLS</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css?v=3.1">
+    <style>
+        .audit-log-page {
+            max-width: 1280px;
+            margin: 0 auto;
+            padding: 24px 20px 48px;
+        }
+        .audit-log-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+        .audit-log-header h1 { font-size: 22px; font-weight: 700; }
+        .filters-card {
+            background: var(--surface-1);
+            border: 1px solid var(--surface-2);
+            border-radius: var(--radius-md);
+            padding: 16px 18px;
+            box-shadow: var(--shadow-soft);
+            margin-bottom: 20px;
+        }
+        .filters-intro {
+            font-size: 13px;
+            margin-bottom: 14px;
+        }
+        .filters-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 14px 16px;
+        }
+        .filter-field-wide { grid-column: span 2; }
+        @media (max-width: 640px) {
+            .filter-field-wide { grid-column: span 1; }
+        }
+        .filter-field label {
+            display: block;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-main);
+            margin-bottom: 5px;
+        }
+        .filter-hint {
+            display: block;
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-top: 4px;
+            line-height: 1.35;
+        }
+        .filter-field input,
+        .filter-field select {
+            width: 100%;
+            border: 1px solid var(--surface-2);
+            border-radius: var(--radius-sm);
+            padding: 8px 10px;
+            font: inherit;
+            font-size: 14px;
+            background: #fff;
+            color: var(--text-main);
+        }
+        .filter-field input[type="search"] {
+            padding-left: 32px;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='%2364748b' viewBox='0 0 16 16'%3E%3Cpath d='M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85zm-5.242 1.156a5 5 0 1 1 0-10 5 5 0 0 1 0 10z'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: 10px center;
+        }
+        .filter-field select { cursor: pointer; }
+        .filters-dates-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 14px;
+            margin-top: 14px;
+            padding-top: 14px;
+            border-top: 1px dashed var(--surface-2);
+        }
+        @media (max-width: 520px) {
+            .filters-dates-row { grid-template-columns: 1fr; }
+        }
+        .filters-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 16px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        .filters-actions .muted { font-size: 12px; margin-left: auto; }
+        .pagination-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin-top: 16px;
+        }
+        .pagination-info { font-size: 14px; color: var(--text-muted); }
+        .loading-row td { text-align: center; padding: 32px; color: var(--text-muted); }
+        .detalhes-cell { max-width: 360px; word-break: break-word; }
+        .acao-badge {
+            display: inline-block;
+            font-size: 12px;
+            font-weight: 500;
+            padding: 2px 8px;
+            border-radius: 4px;
+            background: var(--tenant-primary-soft);
+            color: var(--tenant-primary-strong);
+        }
+    </style>
+</head>
+<body>
+    <div class="audit-log-page">
+        <header class="audit-log-header">
+            <div>
+                <img src="/static/assets/imgs/metric-logo.svg" alt="Metric4" class="metric-logo page-logo">
+                <h1>Log de Ações de Utilizadores</h1>
+                <p class="muted">Histórico global de eventos na plataforma. Sem filtros de data, mostra todo o histórico disponível.</p>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                <button type="button" class="btn btn-secondary" id="btnVoltarAdmin">← Painel de Gestão</button>
+                <button type="button" class="btn btn-danger" id="btnLogout">Terminar sessão</button>
+            </div>
+        </header>
+
+        <section class="filters-card" aria-label="Filtros">
+            <p class="filters-intro muted">Use os campos abaixo para refinar a lista. Campos vazios não restringem os resultados.</p>
+
+            <div class="filters-grid">
+                <div class="filter-field filter-field-wide">
+                    <label for="filtroTenant">Cliente (organização)</label>
+                    <select id="filtroTenant">
+                        <option value="">Todos os clientes</option>
+                    </select>
+                    <span class="filter-hint">Filtrar eventos de um tenant específico</span>
+                </div>
+
+                <div class="filter-field">
+                    <label for="filtroUsername">Utilizador</label>
+                    <input type="search" id="filtroUsername" placeholder="Ex.: admin, Dinis…" autocomplete="off" enterkeyhint="search">
+                    <span class="filter-hint">Nome contém o texto (parcial, sem maiúsculas)</span>
+                </div>
+
+                <div class="filter-field">
+                    <label for="filtroAcao">Tipo de ação</label>
+                    <select id="filtroAcao">
+                        <option value="">Todas as ações</option>
+                        <optgroup label="Sessão">
+                            <option value="login">Início de sessão</option>
+                            <option value="logout">Fim de sessão</option>
+                            <option value="credentials_updated">Credenciais alteradas</option>
+                        </optgroup>
+                        <optgroup label="Clientes (tenants)">
+                            <option value="tenant_created">Cliente criado</option>
+                            <option value="tenant_updated">Cliente atualizado</option>
+                            <option value="tenant_deleted">Cliente eliminado</option>
+                        </optgroup>
+                        <optgroup label="Utilizadores">
+                            <option value="user_created">Utilizador criado</option>
+                            <option value="user_updated">Utilizador atualizado</option>
+                            <option value="user_deleted">Utilizador eliminado</option>
+                        </optgroup>
+                        <optgroup label="Mapas">
+                            <option value="map_created">Mapa criado</option>
+                            <option value="map_updated">Mapa atualizado</option>
+                            <option value="map_deleted">Mapa eliminado</option>
+                        </optgroup>
+                        <optgroup label="Tags">
+                            <option value="tag_created">Tag criada</option>
+                            <option value="tag_deleted">Tag eliminada</option>
+                            <option value="tag_aliases_updated">Nomes de tags atualizados</option>
+                        </optgroup>
+                    </select>
+                </div>
+
+                <div class="filter-field filter-field-wide">
+                    <label for="filtroDetalhes">Texto nos detalhes</label>
+                    <input type="search" id="filtroDetalhes" placeholder="Ex.: Mapa, password, role=admin…" autocomplete="off" enterkeyhint="search">
+                    <span class="filter-hint">Procura dentro da descrição completa do evento</span>
+                </div>
+
+                <div class="filter-field">
+                    <label for="filtroPeriodo">Período</label>
+                    <select id="filtroPeriodo">
+                        <option value="">Todo o histórico</option>
+                        <option value="24h">Últimas 24 horas</option>
+                        <option value="7d">Últimos 7 dias</option>
+                        <option value="30d">Últimos 30 dias</option>
+                        <option value="custom">Intervalo personalizado…</option>
+                    </select>
+                    <span class="filter-hint">Atalhos rápidos ou datas exactas</span>
+                </div>
+            </div>
+
+            <div id="filtroDatasPersonalizadas" class="filters-dates-row escondido" aria-hidden="true">
+                <div class="filter-field">
+                    <label for="filtroTsInicio">De (data e hora)</label>
+                    <input type="datetime-local" id="filtroTsInicio">
+                    <span class="filter-hint">Início do intervalo (inclusivo)</span>
+                </div>
+                <div class="filter-field">
+                    <label for="filtroTsFim">Até (data e hora)</label>
+                    <input type="datetime-local" id="filtroTsFim">
+                    <span class="filter-hint">Fim do intervalo; deixe vazio para «agora»</span>
+                </div>
+            </div>
+
+            <div class="filters-actions">
+                <button type="button" class="btn btn-primary" id="btnAplicar">Aplicar filtros</button>
+                <button type="button" class="btn btn-secondary" id="btnLimpar">Limpar tudo</button>
+                <span class="muted">Enter num campo de pesquisa também aplica</span>
+            </div>
+        </section>
+
+        <section class="table-card">
+            <div class="table-header">
+                <h2>Eventos</h2>
+            </div>
+            <div class="table-scroll">
+                <table class="tabela-auditoria" id="tabelaAuditLog">
+                    <thead>
+                        <tr>
+                            <th>Timestamp</th>
+                            <th>Tenant</th>
+                            <th>Utilizador</th>
+                            <th>Ação</th>
+                            <th>Detalhes</th>
+                        </tr>
+                    </thead>
+                    <tbody id="auditLogBody">
+                        <tr class="loading-row"><td colspan="5">A carregar registos…</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="pagination-bar">
+                <div>
+                    <button type="button" class="btn btn-secondary" id="btnAnterior" disabled>Anterior</button>
+                    <button type="button" class="btn btn-secondary" id="btnProximo" disabled>Próximo</button>
+                </div>
+                <p class="pagination-info" id="paginacaoInfo">—</p>
+            </div>
+        </section>
+    </div>
+
+    <script src="/static/auth.js"></script>
+    <script src="/static/audit_log.js?v=1.2"></script>
+</body>
+</html>

@@ -9,6 +9,7 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <!-- FontAwesome for icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
+    <link rel="stylesheet" href="/static/style.css?v=3.2">
     <style>
         body {
             background-color: #f8f9fa;
@@ -58,6 +59,114 @@
             justify-content: space-between;
             align-items: center;
         }
+
+        .btn-audit-log {
+            background: #fff;
+            border: 1px solid #cbd5e1;
+            color: #334155;
+            font-weight: 600;
+        }
+
+        .btn-audit-log:hover {
+            background: #f8fafc;
+            border-color: #94a3b8;
+            color: #1e293b;
+        }
+
+        .tenant-settings-section {
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 10px;
+            padding: 1rem 1.25rem;
+            margin-bottom: 1rem;
+        }
+
+        .tenant-settings-section h6 {
+            font-size: 0.8rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            color: #64748b;
+            margin-bottom: 0.75rem;
+        }
+
+        .tenant-settings-avatar-wrap {
+            display: flex;
+            align-items: flex-start;
+            gap: 1rem;
+        }
+
+        #modalTenantSettings .modal-body {
+            overflow-x: hidden;
+            overflow-y: auto;
+            max-height: min(78vh, 720px);
+        }
+
+        .tenant-settings-avatar-wrap .tenant-avatar {
+            width: 72px;
+            height: 72px;
+            min-width: 72px;
+            max-width: 72px;
+            max-height: 72px;
+            font-size: 1.25rem;
+            flex-shrink: 0;
+            overflow: hidden;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-sizing: border-box;
+        }
+
+        .tenant-settings-avatar-wrap .tenant-avatar.tenant-avatar--img {
+            padding: 0;
+            background: #e2e8f0;
+        }
+
+        .tenant-settings-avatar-wrap .tenant-avatar img {
+            width: 100% !important;
+            height: 100% !important;
+            max-width: 72px !important;
+            max-height: 72px !important;
+            object-fit: cover;
+            display: block;
+            position: absolute;
+            inset: 0;
+        }
+
+        .avatar-upload-zone {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .avatar-file-input-hidden {
+            position: absolute;
+            width: 0.1px;
+            height: 0.1px;
+            opacity: 0;
+            overflow: hidden;
+            z-index: -1;
+        }
+
+        .avatar-selected-name {
+            font-size: 0.85rem;
+            color: #334155;
+            word-break: break-all;
+        }
+
+        .avatar-selected-name.is-empty {
+            color: #94a3b8;
+            font-style: italic;
+        }
+
+        #tenantAvatarStatus {
+            font-size: 0.82rem;
+            min-height: 1.25rem;
+        }
+
+        #tenantAvatarStatus.is-error { color: #dc2626; }
+        #tenantAvatarStatus.is-success { color: #16a34a; }
+        #tenantAvatarStatus.is-loading { color: #64748b; }
     </style>
 </head>
 
@@ -69,7 +178,10 @@
             <a class="navbar-brand" href="#">
                 <i class="fa-solid fa-gear me-2"></i> Metric4 RTLS | Painel de Gestão
             </a>
-            <div class="d-flex">
+            <div class="d-flex gap-2">
+                <button type="button" id="btnTenantSettings" class="btn btn-outline-light btn-sm d-none">
+                    <i class="fa-solid fa-building me-1"></i> Conta da Empresa
+                </button>
                 <button id="btnAdminLogout" class="btn btn-outline-light btn-sm"><i
                         class="fa-solid fa-arrow-right-from-bracket me-1"></i> Terminar Sessão</button>
             </div>
@@ -78,16 +190,22 @@
 
     <!-- Main Content -->
     <div class="container mt-4">
-        <div class="row mb-4">
+        <div class="row mb-4 d-none" id="tenantSelectorSection">
             <div class="col-md-8 offset-md-2">
                 <div class="card">
                     <div class="card-body">
-                        <div class="d-flex justify-content-between align-items-end mb-2">
+                        <div class="d-flex justify-content-between align-items-end mb-2 flex-wrap gap-2">
                             <label for="tenantSelect" class="form-label fw-bold mb-0"><i
                                     class="fa-solid fa-building me-1"></i> Selecionar Cliente (Tenant)</label>
-                            <button class="btn btn-sm btn-success" data-bs-toggle="modal"
-                                data-bs-target="#modalCreateTenant"><i class="fa-solid fa-plus me-1"></i> Novo
-                                Cliente</button>
+                            <div class="d-flex gap-2 flex-wrap">
+                                <button type="button" class="btn btn-sm btn-audit-log" id="btnTodosEventos"
+                                    onclick="window.location.href='/app/audit-log'">
+                                    <i class="fa-solid fa-list-ul me-1"></i> Todos os Eventos
+                                </button>
+                                <button class="btn btn-sm btn-success" id="btnNovoCliente" data-bs-toggle="modal"
+                                    data-bs-target="#modalCreateTenant"><i class="fa-solid fa-plus me-1"></i> Novo
+                                    Cliente</button>
+                            </div>
                         </div>
                         <div class="input-group input-group-lg">
                             <select class="form-select" id="tenantSelect">
@@ -282,7 +400,7 @@
                             </div>
                         </div>
                         <div class="mb-3">
-                            <label class="form-label">Caminho da Imagem (Ex: /static/assets/mapa.png)</label>
+                            <label class="form-label">Caminho da Imagem (Ex: /static/assets/imgs/maps/meu_mapa.png)</label>
                             <input type="text" class="form-control" id="newMapPath">
                         </div>
                     </div>
@@ -477,11 +595,81 @@
         </div>
     </div>
 
+    <!-- Modal Conta da Empresa (role admin) -->
+    <div class="modal fade" id="modalTenantSettings" tabindex="-1" aria-labelledby="modalTenantSettingsLabel">
+        <div class="modal-dialog modal-dialog-centered modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="modalTenantSettingsLabel"><i class="fa-solid fa-building me-2"></i>Conta da Empresa</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="text-muted small mb-3">Gere a identidade visual e as credenciais de login da organização (tabela <strong>clientes</strong>, não utilizadores individuais).</p>
+
+                    <section class="tenant-settings-section" aria-labelledby="secAvatarHeading">
+                        <h6 id="secAvatarHeading"><i class="fa-solid fa-image me-1"></i> Avatar</h6>
+                        <div class="tenant-settings-avatar-wrap">
+                            <div class="tenant-avatar" id="tenantSettingsAvatarPreview" aria-hidden="true"></div>
+                            <div class="avatar-upload-zone">
+                                <input type="file" id="tenantAvatarFile" class="avatar-file-input-hidden"
+                                    accept="image/png,image/jpeg,image/jpg,image/webp,.png,.jpg,.jpeg,.webp">
+                                <div class="d-flex flex-wrap gap-2 mb-2">
+                                    <label for="tenantAvatarFile" class="btn btn-sm btn-outline-primary mb-0">
+                                        <i class="fa-solid fa-folder-open me-1"></i> Escolher imagem
+                                    </label>
+                                    <button type="button" class="btn btn-sm btn-primary" id="btnUploadAvatar" disabled>
+                                        <i class="fa-solid fa-cloud-arrow-up me-1"></i> Carregar avatar
+                                    </button>
+                                    <button type="button" class="btn btn-sm btn-outline-danger" id="btnRemoverAvatar">
+                                        <i class="fa-solid fa-trash me-1"></i> Remover
+                                    </button>
+                                </div>
+                                <p id="tenantAvatarSelectedName" class="avatar-selected-name is-empty mb-1">Nenhum ficheiro seleccionado</p>
+                                <p class="form-text mb-1">PNG, JPEG ou WebP — máximo 2 MB. Gravado como <code id="tenantAvatarFilename">cliente_id.ext</code></p>
+                                <p id="tenantAvatarStatus" role="status" aria-live="polite"></p>
+                            </div>
+                        </div>
+                    </section>
+
+                    <form id="formTenantSettings">
+                        <section class="tenant-settings-section mb-0">
+                            <h6><i class="fa-solid fa-key me-1"></i> Dados de acesso</h6>
+                            <div class="mb-3">
+                                <label class="form-label" for="tenantSettingsNome">Nome da empresa</label>
+                                <input type="text" class="form-control" id="tenantSettingsNome" required
+                                    placeholder="Nome exibido e usado no login admin">
+                                <div class="form-text">Este nome é o utilizador no ecrã de login do administrador da empresa.</div>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label" for="tenantSettingsNewPassword">Nova password de login</label>
+                                <input type="password" class="form-control" id="tenantSettingsNewPassword" autocomplete="new-password"
+                                    placeholder="Deixar vazio para manter a actual">
+                            </div>
+                            <div class="mb-0">
+                                <label class="form-label" for="tenantSettingsCurrentPassword">Password atual <span class="text-danger">*</span></label>
+                                <input type="password" class="form-control" id="tenantSettingsCurrentPassword" autocomplete="current-password" required
+                                    placeholder="Obrigatória para guardar alterações de nome ou password">
+                            </div>
+                            <p id="tenantSettingsErro" class="text-danger small mb-0 mt-3"></p>
+                        </section>
+                        <div class="modal-footer px-0 pb-0 mt-3">
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Fechar</button>
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fa-solid fa-floppy-disk me-1"></i> Guardar nome e password
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Toast Notification Container -->
     <div class="toast-container"></div>
 
     <!-- Auth System -->
-    <script src="/static/auth.js"></script>
+    <script src="/static/asset-paths.js?v=3.2"></script>
+    <script src="/static/auth.js?v=3"></script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 
     <script>
@@ -489,15 +677,9 @@
         redirecionarSeNaoAutenticado();
         verificarAdminAccess();
 
-        async function verificarAdminAccess() {
-            try {
-                const resposta = await fetch('/api/admin/tenants', {
-                    headers: { 'Authorization': `Bearer ${obterToken()}` }
-                });
-                if (!resposta.ok) {
-                    window.location.href = '/';
-                }
-            } catch {
+        function verificarAdminAccess() {
+            const role = obterRole();
+            if (role !== "superadmin" && role !== "admin") {
                 window.location.href = '/';
             }
         }
@@ -520,6 +702,300 @@
         const btnEditTenant = document.getElementById('btnEditTenant');
         const btnDeleteTenant = document.getElementById('btnDeleteTenant');
 
+        // Conta da empresa (role admin)
+        const btnTenantSettings = document.getElementById('btnTenantSettings');
+        const modalTenantSettingsEl = document.getElementById('modalTenantSettings');
+        const modalTenantSettings = modalTenantSettingsEl
+            ? new bootstrap.Modal(modalTenantSettingsEl)
+            : null;
+        const tenantAvatarFileInput = document.getElementById('tenantAvatarFile');
+        const btnUploadAvatar = document.getElementById('btnUploadAvatar');
+        const tenantAvatarStatus = document.getElementById('tenantAvatarStatus');
+        const tenantAvatarSelectedName = document.getElementById('tenantAvatarSelectedName');
+        let tenantAvatarPendingFile = null;
+        let tenantAvatarPreviewObjectUrl = null;
+
+        function extrairErroApi(dados, status) {
+            if (status === 404) {
+                return 'A API em execução está desatualizada (rota em falta). Feche a janela «Servidor API Metric4», volte a correr arrancar_sistema_v1.bat (ou reinicie o uvicorn) e faça Ctrl+F5 nesta página.';
+            }
+            if (!dados?.detail) return 'Erro na operação';
+            if (typeof dados.detail === 'string') {
+                if (dados.detail === 'Not Found') {
+                    return 'Recurso não encontrado na API. Reinicie o servidor API (uvicorn) e recarregue a página.';
+                }
+                return dados.detail;
+            }
+            if (Array.isArray(dados.detail)) {
+                return dados.detail.map((d) => d.msg || JSON.stringify(d)).join('; ');
+            }
+            return String(dados.detail);
+        }
+
+        async function verificarApiTenantProfile() {
+            try {
+                const r = await fetch('/api/health');
+                if (!r.ok) return false;
+                const h = await r.json();
+                return h.tenant_profile_api === true;
+            } catch {
+                return false;
+            }
+        }
+
+        function definirEstadoAvatarStatus(mensagem, tipo) {
+            tenantAvatarStatus.textContent = mensagem || '';
+            tenantAvatarStatus.className = tipo ? `is-${tipo}` : '';
+        }
+
+        function libertarPreviewObjectUrl() {
+            if (tenantAvatarPreviewObjectUrl) {
+                URL.revokeObjectURL(tenantAvatarPreviewObjectUrl);
+                tenantAvatarPreviewObjectUrl = null;
+            }
+        }
+
+        function actualizarPreviewAvatarModal(nome, logoUrl) {
+            const preview = document.getElementById('tenantSettingsAvatarPreview');
+            const tenantId = obterTenantId();
+            document.getElementById('tenantAvatarFilename').textContent =
+                tenantId ? `${tenantId}.png | .jpg | .webp` : '—';
+            if (window.ASSET_PATHS?.aplicarAvatarElemento) {
+                window.ASSET_PATHS.aplicarAvatarElemento(preview, nome, logoUrl);
+            } else {
+                preview.textContent = (nome || 'M4').slice(0, 2).toUpperCase();
+            }
+        }
+
+        function limparSelecaoAvatarFicheiro() {
+            tenantAvatarPendingFile = null;
+            if (tenantAvatarFileInput) tenantAvatarFileInput.value = '';
+            if (btnUploadAvatar) btnUploadAvatar.disabled = true;
+            tenantAvatarSelectedName.textContent = 'Nenhum ficheiro seleccionado';
+            tenantAvatarSelectedName.classList.add('is-empty');
+            libertarPreviewObjectUrl();
+        }
+
+        const AVATAR_MAX_PX = 2048;
+
+        function validarFicheiroAvatarLocal(ficheiro) {
+            const tipos = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/pjpeg'];
+            const extOk = /\.(png|jpe?g|webp)$/i.test(ficheiro.name || '');
+            if (!extOk && ficheiro.type && !tipos.includes(ficheiro.type)) {
+                return 'Formato não suportado. Use PNG, JPEG ou WebP.';
+            }
+            if (ficheiro.size > 2 * 1024 * 1024) {
+                return 'Imagem demasiado grande (máximo 2 MB).';
+            }
+            return null;
+        }
+
+        function mostrarPreviewAvatarLocal(ficheiro) {
+            const preview = document.getElementById('tenantSettingsAvatarPreview');
+            const nome = document.getElementById('tenantSettingsNome').value || 'Empresa';
+
+            libertarPreviewObjectUrl();
+            tenantAvatarPreviewObjectUrl = URL.createObjectURL(ficheiro);
+
+            if (window.ASSET_PATHS?.aplicarAvatarElemento) {
+                window.ASSET_PATHS.aplicarAvatarElemento(preview, nome, tenantAvatarPreviewObjectUrl);
+            } else {
+                preview.innerHTML = '';
+                const img = document.createElement('img');
+                img.src = tenantAvatarPreviewObjectUrl;
+                img.alt = nome;
+                img.style.cssText = 'width:100%;height:100%;object-fit:cover;display:block';
+                preview.appendChild(img);
+            }
+
+            const probe = new Image();
+            probe.onload = () => {
+                if (probe.width > AVATAR_MAX_PX || probe.height > AVATAR_MAX_PX) {
+                    limparSelecaoAvatarFicheiro();
+                    const logo = localStorage.getItem('tenant_logo_url') || null;
+                    actualizarPreviewAvatarModal(nome, logo);
+                    definirEstadoAvatarStatus(
+                        `Resolução demasiado alta (${probe.width}×${probe.height}px). Máximo ${AVATAR_MAX_PX}×${AVATAR_MAX_PX}.`,
+                        'error'
+                    );
+                }
+            };
+            probe.onerror = () => {
+                limparSelecaoAvatarFicheiro();
+                const logo = localStorage.getItem('tenant_logo_url') || null;
+                actualizarPreviewAvatarModal(nome, logo);
+                definirEstadoAvatarStatus('Não foi possível ler o ficheiro como imagem.', 'error');
+            };
+            probe.src = tenantAvatarPreviewObjectUrl;
+        }
+
+        function aoSeleccionarAvatarFicheiro(ficheiro) {
+            const erroLocal = validarFicheiroAvatarLocal(ficheiro);
+            if (erroLocal) {
+                limparSelecaoAvatarFicheiro();
+                definirEstadoAvatarStatus(erroLocal, 'error');
+                return;
+            }
+
+            tenantAvatarPendingFile = ficheiro;
+            btnUploadAvatar.disabled = false;
+            const tamanhoKb = Math.round(ficheiro.size / 1024);
+            tenantAvatarSelectedName.textContent = `${ficheiro.name} (${tamanhoKb} KB)`;
+            tenantAvatarSelectedName.classList.remove('is-empty');
+            definirEstadoAvatarStatus('Pré-visualização local — clique em «Carregar avatar» para guardar.', '');
+
+            mostrarPreviewAvatarLocal(ficheiro);
+        }
+
+        async function enviarAvatarSelecionado() {
+            if (!tenantAvatarPendingFile) {
+                definirEstadoAvatarStatus('Seleccione uma imagem primeiro.', 'error');
+                return;
+            }
+
+            definirEstadoAvatarStatus('A carregar imagem…', 'loading');
+            btnUploadAvatar.disabled = true;
+
+            const formData = new FormData();
+            formData.append('file', tenantAvatarPendingFile, tenantAvatarPendingFile.name);
+
+            try {
+                const token = obterToken();
+                const resp = await fetch('/api/tenant/profile/avatar', {
+                    method: 'POST',
+                    headers: { Authorization: `Bearer ${token}` },
+                    body: formData,
+                });
+                const dados = await resp.json().catch(() => ({}));
+                if (!resp.ok) {
+                    throw new Error(extrairErroApi(dados, resp.status));
+                }
+
+                localStorage.setItem('tenant_logo_url', dados.logo_url);
+                const nome = document.getElementById('tenantSettingsNome').value;
+                limparSelecaoAvatarFicheiro();
+                actualizarPreviewAvatarModal(nome, dados.logo_url);
+                definirEstadoAvatarStatus('Avatar guardado com sucesso.', 'success');
+                showToast('Avatar atualizado com sucesso!');
+            } catch (error) {
+                definirEstadoAvatarStatus(error.message, 'error');
+                btnUploadAvatar.disabled = !!tenantAvatarPendingFile;
+            }
+        }
+
+        async function abrirModalTenantSettings() {
+            document.getElementById('tenantSettingsErro').textContent = '';
+            document.getElementById('tenantSettingsNewPassword').value = '';
+            document.getElementById('tenantSettingsCurrentPassword').value = '';
+            limparSelecaoAvatarFicheiro();
+            definirEstadoAvatarStatus('', '');
+
+            const apiOk = await verificarApiTenantProfile();
+            if (!apiOk) {
+                definirEstadoAvatarStatus(
+                    'Servidor API desatualizado: reinicie a janela «Servidor API Metric4» e recarregue a página (Ctrl+F5).',
+                    'error'
+                );
+            }
+
+            const nome = localStorage.getItem('tenant_nome') || obterTenantId() || '';
+            const logo = localStorage.getItem('tenant_logo_url') || null;
+            document.getElementById('tenantSettingsNome').value = nome;
+            actualizarPreviewAvatarModal(nome, logo);
+
+            if (apiOk) {
+                try {
+                    const dados = await apiFetch('/api/tenant/branding');
+                    document.getElementById('tenantSettingsNome').value = dados.nome || nome;
+                    if (dados.logo_url) {
+                        localStorage.setItem('tenant_logo_url', dados.logo_url);
+                    } else {
+                        localStorage.removeItem('tenant_logo_url');
+                    }
+                    actualizarPreviewAvatarModal(dados.nome, dados.logo_url || null);
+                } catch (error) {
+                    definirEstadoAvatarStatus(error.message, 'error');
+                }
+            }
+
+            modalTenantSettings?.show();
+        }
+
+        btnTenantSettings?.addEventListener('click', abrirModalTenantSettings);
+
+        tenantAvatarFileInput?.addEventListener('change', (e) => {
+            const ficheiro = e.target.files?.[0];
+            if (!ficheiro) {
+                limparSelecaoAvatarFicheiro();
+                const nome = document.getElementById('tenantSettingsNome').value;
+                const logo = localStorage.getItem('tenant_logo_url') || null;
+                actualizarPreviewAvatarModal(nome, logo);
+                return;
+            }
+            aoSeleccionarAvatarFicheiro(ficheiro);
+        });
+
+        btnUploadAvatar?.addEventListener('click', enviarAvatarSelecionado);
+
+        document.getElementById('btnRemoverAvatar')?.addEventListener('click', async () => {
+            definirEstadoAvatarStatus('', '');
+            document.getElementById('tenantSettingsErro').textContent = '';
+            if (!confirm('Remover o avatar da empresa?')) return;
+            try {
+                await apiFetch('/api/tenant/profile/avatar', { method: 'DELETE' });
+                localStorage.removeItem('tenant_logo_url');
+                limparSelecaoAvatarFicheiro();
+                const nome = document.getElementById('tenantSettingsNome').value;
+                actualizarPreviewAvatarModal(nome, null);
+                definirEstadoAvatarStatus('Avatar removido.', 'success');
+                showToast('Avatar removido.');
+            } catch (error) {
+                definirEstadoAvatarStatus(error.message, 'error');
+            }
+        });
+
+        modalTenantSettingsEl?.addEventListener('hidden.bs.modal', () => {
+            libertarPreviewObjectUrl();
+        });
+
+        document.getElementById('formTenantSettings')?.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const erroEl = document.getElementById('tenantSettingsErro');
+            erroEl.textContent = '';
+
+            const body = {
+                current_password: document.getElementById('tenantSettingsCurrentPassword').value,
+            };
+            const nome = document.getElementById('tenantSettingsNome').value.trim();
+            const novaPass = document.getElementById('tenantSettingsNewPassword').value;
+            if (nome) body.nome = nome;
+            if (novaPass) body.new_password = novaPass;
+
+            try {
+                const dados = await apiFetch('/api/tenant/profile', {
+                    method: 'PUT',
+                    body,
+                });
+                localStorage.setItem('tenant_nome', dados.nome);
+                document.querySelector('.navbar-brand').innerHTML =
+                    `<i class="fa-solid fa-gear me-2"></i> Metric4 RTLS | Gestão de ${dados.nome}`;
+                const opt = tenantSelect.querySelector(`option[value="${dados.tenant_id}"]`);
+                if (opt) opt.textContent = dados.nome;
+                actualizarPreviewAvatarModal(
+                    dados.nome,
+                    localStorage.getItem('tenant_logo_url') || null
+                );
+                showToast('Dados da empresa atualizados!');
+                if (dados.nome_alterado) {
+                    showToast('O nome de login mudou — use o novo nome na próxima sessão.', 'error');
+                }
+                document.getElementById('tenantSettingsCurrentPassword').value = '';
+                document.getElementById('tenantSettingsNewPassword').value = '';
+            } catch (error) {
+                erroEl.textContent = error.message;
+            }
+        });
+
         // Logout
         document.getElementById('btnAdminLogout').addEventListener('click', async () => {
             try {
@@ -529,7 +1005,11 @@
             }
             localStorage.removeItem("cracha_jwt");
             localStorage.removeItem("tenant_id");
+            localStorage.removeItem("tenant_nome");
+            localStorage.removeItem("is_admin");
+            localStorage.removeItem("role");
             localStorage.removeItem("login_timestamp");
+            localStorage.removeItem("tenant_logo_url");
             window.location.href = '/';
         });
 
@@ -544,12 +1024,16 @@
 
             const response = await fetch(url, options);
             if (!response.ok) {
-                if (response.status === 401 || response.status === 403) {
+                if (response.status === 401) {
                     window.location.href = '/';
-                    throw new Error('Sessão expirada ou acesso negado');
+                    throw new Error('Sessão expirada. Por favor autentique-se novamente.');
+                }
+                if (response.status === 403) {
+                    // 403 = sem permissão para este recurso específico, não forçar logout
+                    throw new Error('Acesso negado a este recurso.');
                 }
                 const errorData = await response.json().catch(() => ({}));
-                throw new Error(errorData.detail || 'Erro na operação');
+                throw new Error(extrairErroApi(errorData, response.status));
             }
             return response.json();
         }
@@ -677,8 +1161,11 @@
                 configSection.classList.remove('d-none');
                 document.getElementById('mapaCard').classList.remove('d-none');
                 document.getElementById('tagsConfigCol').classList.remove('d-none');
-                btnEditTenant.classList.remove('d-none');
-                btnDeleteTenant.classList.remove('d-none');
+                // botões de editar/apagar tenant só visíveis para superadmin
+                if (obterRole() !== "admin") {
+                    btnEditTenant.classList.remove('d-none');
+                    btnDeleteTenant.classList.remove('d-none');
+                }
                 sessionLogsSection.classList.remove('d-none');
                 loadTenantSessionLogs(tenantId);
             } catch (error) {
@@ -736,12 +1223,9 @@
         function updateMapPreview(path) {
             const preview = document.getElementById('editMapPreview');
             if (path) {
-                let previewSrc = path;
-                if (previewSrc.startsWith('frontend/')) {
-                    previewSrc = previewSrc.replace('frontend/', '/static/');
-                } else if (!previewSrc.startsWith('/')) {
-                    previewSrc = '/' + previewSrc;
-                }
+                const previewSrc = window.ASSET_PATHS
+                    ? window.ASSET_PATHS.normalizarCaminhoImagem(path)
+                    : path;
                 preview.src = previewSrc;
                 preview.classList.remove('d-none');
             } else {
@@ -1012,8 +1496,34 @@
             }
         });
 
-        // init
-        document.addEventListener('DOMContentLoaded', () => loadTenants());
+        // init — comportamento diferente por role
+        document.addEventListener('DOMContentLoaded', () => {
+            const meuRole = obterRole();
+
+            if (meuRole === "admin") {
+                // tenant selector já oculto por default no HTML; configurar modo ADMIN
+                const meuTenantId = obterTenantId();
+                const meuTenantNome = localStorage.getItem('tenant_nome') || meuTenantId;
+
+                document.getElementById('btnTenantSettings')?.classList.remove('d-none');
+
+                // inserir opção sintética para que operações de CRUD usem o tenant correto
+                tenantSelect.innerHTML = `<option value="${meuTenantId}" selected>${meuTenantNome}</option>`;
+
+                // actualizar título da navbar com o nome do cliente
+                document.querySelector('.navbar-brand').innerHTML =
+                    `<i class="fa-solid fa-gear me-2"></i> Metric4 RTLS | Gestão de ${meuTenantNome}`;
+
+                loadTenantData(meuTenantId);
+            } else if (meuRole === "superadmin") {
+                // superadmin: mostrar seletor de tenant (oculto por default no HTML)
+                document.getElementById('tenantSelectorSection').classList.remove('d-none');
+                loadTenants();
+            } else {
+                // sem permissão — redirecionar para o login
+                window.location.href = '/';
+            }
+        });
     </script>
 </body>
 
