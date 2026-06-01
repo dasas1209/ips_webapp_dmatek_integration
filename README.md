@@ -13,23 +13,34 @@ Stack: Python 3.11+ · FastAPI · InfluxDB Cloud · SQLite3 · HTML/JS/CSS
 ├── .env                        # variáveis de ambiente (não versionado — ver secção Configuração)
 ├── .gitignore
 ├── requirements.txt            # dependências Python
-├── arrancar_sistema_v1.bat     # script de arranque Windows (instala deps, setup BD, inicia serviços)
+├── scripts/arrancar_sistema_v1.bat  # script de arranque Windows (instala deps, setup BD, inicia serviços)
 │
 │   ── BACKEND ──
 │
 ├── config.py                   # configuração centralizada — lê .env e exporta constantes
-├── database_setup.py           # inicialização e seeding da BD SQLite (correr uma vez)
-├── escuta_dmatek.py            # motor WebSocket: recebe posições do servidor Dmatek → grava no InfluxDB
-├── api_dmatek.py               # API REST FastAPI: autenticação JWT, endpoints de posições/KPIs/auditoria
-├── shared.py                   # shim de compatibilidade — re-exporta de services/database.py
 │
-│   ── SERVIÇOS (lógica partilhada) ──
+│   ── WORKER ──
 │
-├── services/
-│   ├── __init__.py
-│   ├── database.py             # get_db_connection · validar_tenant_id · carregar_matriz_clientes · obter_limites_mapa
-│   ├── influx_client.py        # singleton do cliente InfluxDB (evita abertura de ligação TCP por pedido)
-│   └── kpi_engine.py           # cálculo de KPIs por tag — função pura sem I/O (RegistoTag · KpiTag · calcular_kpis)
+├── worker/
+│   └── escuta_dmatek.py        # motor WebSocket: recebe posições do servidor Dmatek → grava no InfluxDB
+│
+│   ── SCRIPTS ──
+│
+├── scripts/
+│   ├── database_setup.py       # inicialização e seeding da BD SQLite (correr uma vez)
+│   └── arrancar_sistema_v1.bat # script de arranque Windows
+│
+│   ── API ──
+│
+├── app/
+│   ├── main.py                 # FastAPI app, CORS, mounts, startup
+│   ├── models.py               # Pydantic models
+│   ├── dependencies.py         # JWT, rate limiting, dependências partilhadas
+│   ├── routes/                 # endpoints por domínio (auth, realtime, kpis, admin, audit, tenant)
+│   └── services/
+│       ├── database.py         # get_db_connection · validar_tenant_id · carregar_matriz_clientes · obter_limites_mapa
+│       ├── influx_client.py    # singleton do cliente InfluxDB (evita abertura de ligação TCP por pedido)
+│       └── kpi_engine.py       # cálculo de KPIs por tag — função pura sem I/O (RegistoTag · KpiTag · calcular_kpis)
 │
 │   ── BASE DE DADOS ──
 │
@@ -109,14 +120,14 @@ SECRET_KEY=<chave-secreta-para-assinar-jwt>
 ## Arranque
 
 ```bat
-arrancar_sistema_v1.bat
+scripts\arrancar_sistema_v1.bat
 ```
 
 O script faz, por ordem:
 1. `pip install -r requirements.txt`
-2. `python database_setup.py` — cria tabelas e seed inicial
-3. `python escuta_dmatek.py` — motor WebSocket (janela separada)
-4. `uvicorn api_dmatek:app --reload` — API REST (janela separada)
+2. `python scripts/database_setup.py` — cria tabelas e seed inicial
+3. `python worker/escuta_dmatek.py` — motor WebSocket (janela separada)
+4. `uvicorn app.main:app --reload` — API REST (janela separada)
 5. Abre `http://127.0.0.1:8000/app` no browser
 
 ---
@@ -127,12 +138,12 @@ O script faz, por ordem:
 Servidor Dmatek (WebSocket)
         │
         ▼
-escuta_dmatek.py
+worker/escuta_dmatek.py
   ├── grava posicao_tag → InfluxDB  (campo status, coord_x/y, bateria, tenant_id)
   └── grava evento_auditoria → InfluxDB  (EMERGENCY_BUTTON, OFFLINE_ALARM, ONLINE_RECOVERY)
         │
         ▼
-api_dmatek.py (FastAPI)
+app/main.py (FastAPI)
   ├── GET /posicoes       → última posição por tag (polling 2s do frontend)
   ├── GET /historico      → posições num instante passado (slider temporal)
   ├── GET /kpis           → KPIs do turno actual (distância, utilização, bateria)

@@ -11,12 +11,12 @@ Stack: Python 3.11+ · FastAPI · InfluxDB Cloud · SQLite3 · HTML/JS/CSS
 Servidor Dmatek (WebSocket ws://172.16.0.201:5002/TagPosition)
         │  {"id_fisico":"TAG001","status":"OK","x":100.5,"y":45.3,"rssi":-45,"bateria":85}
         ▼
-escuta_dmatek.py         ← motor de captura (processo separado)
+worker/escuta_dmatek.py  ← motor de captura (processo separado)
   ├── posicao_tag        → InfluxDB  (coord_x/y, status, battery_percent, tag_id, tenant_id)
   └── evento_auditoria   → InfluxDB  (EMERGENCY_BUTTON, OFFLINE_ALARM, ONLINE_RECOVERY)
         │
         ▼
-api_dmatek.py (FastAPI/uvicorn :8000)
+app/main.py (FastAPI/uvicorn :8000)
   ├── /app               → serve o frontend (index.html)
   ├── /token             → login OAuth2, devolve JWT
   ├── /posicoes          → última posição por tag  (polling 2s)
@@ -39,14 +39,16 @@ frontend/
 | Ficheiro | Responsabilidade |
 |---|---|
 | `config.py` | Lê `.env`, exporta constantes (INFLUX_*, SECRET_KEY, ALGORITHM, etc.) |
-| `database_setup.py` | Cria tabelas SQLite + seed inicial (correr uma vez) |
-| `escuta_dmatek.py` | WebSocket listener → escrita InfluxDB (corre em janela separada) |
-| `api_dmatek.py` | FastAPI app principal — todos os endpoints REST + autenticação |
-| `shared.py` | Shim de compatibilidade — re-exporta `services/database.py` |
-| `services/database.py` | `get_db_connection`, `validar_tenant_id`, `carregar_matriz_clientes`, `obter_limites_mapa` |
-| `services/influx_client.py` | Singleton do cliente InfluxDB (evita TCP/TLS por pedido) |
-| `services/kpi_engine.py` | `calcular_kpis(RegistoTag) → KpiTag` — função pura sem I/O |
-| `arrancar_sistema_v1.bat` | Arranque completo: pip install → DB setup → escuta → API → browser |
+| `scripts/database_setup.py` | Cria tabelas SQLite + seed inicial (correr uma vez) |
+| `worker/escuta_dmatek.py` | WebSocket listener → escrita InfluxDB (corre em janela separada) |
+| `app/main.py` | FastAPI app principal — todos os endpoints REST + autenticação |
+| `app/models.py` | Pydantic models (MapaCreate, UserCreate, etc.) |
+| `app/dependencies.py` | JWT, rate limiting, dependências partilhadas |
+| `app/routes/` | Endpoints por domínio (auth, realtime, kpis, admin, audit, tenant) |
+| `app/services/database.py` | `get_db_connection`, `validar_tenant_id`, `carregar_matriz_clientes`, `obter_limites_mapa` |
+| `app/services/influx_client.py` | Singleton do cliente InfluxDB (evita TCP/TLS por pedido) |
+| `app/services/kpi_engine.py` | `calcular_kpis(RegistoTag) → KpiTag` — função pura sem I/O |
+| `scripts/arrancar_sistema_v1.bat` | Arranque completo: pip install → DB setup → escuta → API → browser |
 
 ---
 
@@ -133,9 +135,9 @@ frontend/
 ## Arranque
 
 ```bat
-arrancar_sistema_v1.bat
+scripts\arrancar_sistema_v1.bat
 ```
-Sequência: `pip install` → `database_setup.py` → `escuta_dmatek.py` (janela separada) → `uvicorn api_dmatek:app --reload` (janela separada) → browser em `http://127.0.0.1:8000/app`
+Sequência: `pip install` → `scripts/database_setup.py` → `worker/escuta_dmatek.py` (janela separada) → `uvicorn app.main:app --reload` (janela separada) → browser em `http://127.0.0.1:8000/app`
 
 ---
 
