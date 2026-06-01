@@ -1,6 +1,8 @@
 @echo off
 color 0A
 cd /d "%~dp0.."
+:: garante que a raiz do projecto esta no PYTHONPATH para imports de app.* e config
+set PYTHONPATH=%CD%;%PYTHONPATH%
 echo ===================================================
 echo       Metric4 RTLS  -  Sistema de Arranque
 echo ===================================================
@@ -51,7 +53,8 @@ echo [7] A abrir a WebApp no browser...
 ::   ADMIN      (login via cliente) ->  /admin.html  (gestao do proprio cliente)
 ::   USER       (login via user)    ->  /app         (dashboard de supervisor)
 set APP_URL=http://127.0.0.1:8000/app
-start %APP_URL%
+set DOCS_URL=http://127.0.0.1:8000/docs
+start "" %APP_URL%
 
 echo.
 echo ===================================================
@@ -62,8 +65,8 @@ echo   "Escuta Metric4"       — recebe posicoes UWB do servidor Dmatek
 echo   "Servidor API Metric4" — serve a API REST e o frontend
 echo.
 echo Acesso:
-echo   Browser   ->  http://127.0.0.1:8000/app
-echo   API Docs  ->  http://127.0.0.1:8000/docs
+echo   Browser   ->  %APP_URL%
+echo   API Docs  ->  %DOCS_URL%
 echo.
 echo Roles disponiveis:
 echo   SUPERADMIN — user da tabela users com cliente_id = cliente_admin
