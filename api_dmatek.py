@@ -62,7 +62,7 @@ app.add_middleware(
 app.mount("/static", StaticFiles(directory="frontend"), name="static")
 
 # versão das rotas de perfil do tenant (health check no frontend)
-API_BUILD_ID = "2026-06-01-tenant-profile"
+API_BUILD_ID = "2026-06-01-password-crud-v3"
 
 
 @app.on_event("startup")
@@ -826,9 +826,11 @@ class TagAliasesUpdate(BaseModel):
 
 class TenantCreate(BaseModel):
     nome: str
+    password: Optional[str] = None
 
 class TenantUpdate(BaseModel):
     nome: str
+    password: Optional[str] = None
 
 class UserCreate(BaseModel):
     username: str
@@ -849,8 +851,8 @@ def admin_get_tenants(_: str = Depends(require_admin)):
     """lista todos os tenants"""
     try:
         with get_db_connection() as conn:
-            clientes = conn.execute("SELECT id, nome FROM clientes").fetchall()
-            return [{"id": c["id"], "nome": c["nome"]} for c in clientes]
+            clientes = conn.execute("SELECT id, nome, password FROM clientes").fetchall()
+            return [{"id": c["id"], "nome": c["nome"], "password": c["password"] or ""} for c in clientes]
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"erro ao obter clientes: {exc}")
 
@@ -1034,7 +1036,10 @@ def admin_create_tenant(data: TenantCreate, background_tasks: BackgroundTasks, a
             clean_name = re.sub(r'_+', '_', clean_name).strip('_')[:10]
             suffix = uuid.uuid4().hex[:6]
             novo_id = f"{clean_name}_{suffix}" if clean_name else f"tenant_{suffix}"
-            conn.execute("INSERT INTO clientes (id, nome) VALUES (?, ?)", (novo_id, data.nome))
+            conn.execute(
+                "INSERT INTO clientes (id, nome, password) VALUES (?, ?, ?)",
+                (novo_id, data.nome, data.password or None),
+            )
             conn.commit()
             
         background_tasks.add_task(
@@ -1054,12 +1059,19 @@ def admin_update_tenant(tenant_id: str, data: TenantUpdate, background_tasks: Ba
             row = conn.execute("SELECT nome FROM clientes WHERE id = ?", (tenant_id,)).fetchone()
             if not row:
                 raise HTTPException(status_code=404, detail="Cliente não encontrado.")
-            conn.execute("UPDATE clientes SET nome = ? WHERE id = ?", (data.nome, tenant_id))
+            
+            if data.password is not None:
+                conn.execute("UPDATE clientes SET nome = ?, password = ? WHERE id = ?",
+                             (data.nome, data.password or None, tenant_id))
+            else:
+                conn.execute("UPDATE clientes SET nome = ? WHERE id = ?", (data.nome, tenant_id))
+                
             conn.commit()
             
+        pass_mudou = "Sim" if data.password else "Não"
         background_tasks.add_task(
             log_audit_event, admin_tenant, tenant_id,
-            "tenant_updated", f"Cliente ID: {tenant_id} atualizado. Nome alterado de '{row['nome']}' para '{data.nome}'.",
+            "tenant_updated", f"Cliente ID: {tenant_id} atualizado. Nome alterado de '{row['nome']}' para '{data.nome}'. Password Alterada: {pass_mudou}.",
         )
         return {"sucesso": True}
     except Exception as exc:

@@ -362,6 +362,10 @@
                             <label class="form-label">Nome do Cliente</label>
                             <input type="text" class="form-control" id="newTenantName" required>
                         </div>
+                        <div class="mb-3">
+                            <label class="form-label">Password de Login <span class="text-muted fw-normal">(opcional)</span></label>
+                            <input type="text" class="form-control" id="newTenantPassword" placeholder="Necessária para o cliente aceder ao painel admin">
+                        </div>
                         <div class="alert alert-info py-2 small mb-0">
                             <i class="fa-solid fa-circle-info me-1"></i> O ID único do cliente será gerado automaticamente.
                         </div>
@@ -468,6 +472,10 @@
                         <div class="mb-3">
                             <label class="form-label">Nome do Cliente</label>
                             <input type="text" class="form-control" id="editTenantName" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Password</label>
+                            <input type="text" class="form-control" id="editTenantPassword" placeholder="Sem password definida">
                         </div>
                     </div>
                     <div class="modal-footer">
@@ -1069,6 +1077,7 @@
         }
 
         let tenantsMap = {};
+        let tenantsPasswordMap = {};
 
         // carrega lista de tenants ao iniciar
         async function loadTenants(selectedId = null) {
@@ -1076,8 +1085,10 @@
                 const tenants = await apiFetch('/api/admin/tenants');
                 tenantSelect.innerHTML = '<option value="" selected disabled>Escolha um cliente...</option>';
                 tenantsMap = {};
+                tenantsPasswordMap = {};
                 tenants.forEach(t => {
                     tenantsMap[t.id] = t.nome;
+                    tenantsPasswordMap[t.id] = t.password || '';
                     const option = document.createElement('option');
                     option.value = t.id;
                     option.textContent = t.nome;
@@ -1275,10 +1286,13 @@
         document.getElementById('formCreateTenant').addEventListener('submit', async (e) => {
             e.preventDefault();
             const nome = document.getElementById('newTenantName').value.trim();
+            const password = document.getElementById('newTenantPassword').value.trim();
+            const body = { nome };
+            if (password) body.password = password;
             try {
                 const response = await apiFetch('/api/admin/tenants', {
                     method: 'POST',
-                    body: { nome }
+                    body
                 });
                 showToast('Cliente criado com sucesso!');
                 closeModal('modalCreateTenant');
@@ -1292,16 +1306,20 @@
         document.getElementById('btnEditTenant').addEventListener('click', () => {
             const tenantId = tenantSelect.value;
             document.getElementById('editTenantName').value = tenantsMap[tenantId] || '';
+            document.getElementById('editTenantPassword').value = tenantsPasswordMap[tenantId] || '';
         });
 
         document.getElementById('formEditTenant').addEventListener('submit', async (e) => {
             e.preventDefault();
             const tenantId = tenantSelect.value;
             const nome = document.getElementById('editTenantName').value.trim();
+            const password = document.getElementById('editTenantPassword').value.trim();
+            const body = { nome, password };
+
             try {
                 await apiFetch(`/api/admin/tenants/${tenantId}`, {
                     method: 'PUT',
-                    body: { nome }
+                    body
                 });
                 showToast('Cliente atualizado com sucesso!');
                 closeModal('modalEditTenant');
