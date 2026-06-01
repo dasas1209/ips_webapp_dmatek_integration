@@ -642,6 +642,8 @@ def _eventos_auditoria_influx_para_incidentes(
 def obter_dados_auditoria(
     inicio: str = Query(..., description="Início ISO 8601, ex: 2026-05-11T06:00:00Z"),
     fim:    str = Query(..., description="Fim ISO 8601, ex: 2026-05-11T14:00:00Z"),
+    background_tasks: BackgroundTasks = None,
+    payload: dict = Depends(obter_payload_token),
     tenant_id: str = Depends(aplicar_rate_limit),
 ):
     """consulta fluxo temporal completo para dashboard de auditoria"""
@@ -777,6 +779,16 @@ def obter_dados_auditoria(
         if baterias_para_media:
             bateria_media_frota = round(sum(baterias_para_media) / len(baterias_para_media), 1)
 
+
+        username = payload.get("sub", "desconhecido")
+        if background_tasks:
+            background_tasks.add_task(
+                log_audit_event,
+                username,
+                tenant_id,
+                "audit_report_viewed",
+                f"Período: {inicio} → {fim} | Tags ativas: {len(tags)} | Incidentes: {len(incidentes)}.",
+            )
 
         return {
             "sucesso":  True,

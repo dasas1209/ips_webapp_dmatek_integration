@@ -3,21 +3,32 @@
  */
 
 const ACOES_LABEL = {
+    // sessão
     login: "Início de sessão",
     logout: "Fim de sessão",
     credentials_updated: "Credenciais alteradas",
+    // clientes (tenants)
     tenant_created: "Cliente criado",
     tenant_updated: "Cliente atualizado",
     tenant_deleted: "Cliente eliminado",
+    // perfil e branding
+    tenant_profile_updated: "Perfil da empresa atualizado",
+    tenant_avatar_uploaded: "Avatar da empresa atualizado",
+    tenant_avatar_removed: "Avatar da empresa removido",
+    // utilizadores
     user_created: "Utilizador criado",
     user_updated: "Utilizador atualizado",
     user_deleted: "Utilizador eliminado",
+    // mapas
     map_created: "Mapa criado",
     map_updated: "Mapa atualizado",
     map_deleted: "Mapa eliminado",
+    // tags
     tag_created: "Tag criada",
     tag_deleted: "Tag eliminada",
     tag_aliases_updated: "Nomes de tags atualizados",
+    // dados e relatórios
+    audit_report_viewed: "Relatório de auditoria consultado",
 };
 
 const PERIODOS_MS = {

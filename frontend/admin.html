@@ -302,16 +302,39 @@
                         <div class="d-flex gap-2 align-items-center">
                             <select id="logActionFilter" class="form-select form-select-sm" style="width: auto;" onchange="reloadTenantSessionLogs()">
                                 <option value="">Todas as Ações</option>
-                                <option value="login">Login</option>
-                                <option value="logout">Logout</option>
-                                <option value="user_created">Utilizador Criado</option>
-                                <option value="user_deleted">Utilizador Apagado</option>
-                                <option value="map_created">Mapa Criado</option>
-                                <option value="map_updated">Mapa Atualizado</option>
-                                <option value="map_deleted">Mapa Apagado</option>
-                                <option value="tag_created">Tag Criada</option>
-                                <option value="tag_deleted">Tag Apagada</option>
-                                <option value="tag_aliases_updated">Alias de Tag(s) Atualizado</option>
+                                <optgroup label="Sessão">
+                                    <option value="login">Login</option>
+                                    <option value="logout">Logout</option>
+                                    <option value="credentials_updated">Credenciais Alteradas</option>
+                                </optgroup>
+                                <optgroup label="Clientes (tenants)">
+                                    <option value="tenant_created">Cliente Criado</option>
+                                    <option value="tenant_updated">Cliente Atualizado</option>
+                                    <option value="tenant_deleted">Cliente Eliminado</option>
+                                </optgroup>
+                                <optgroup label="Perfil e Branding">
+                                    <option value="tenant_profile_updated">Perfil da Empresa Atualizado</option>
+                                    <option value="tenant_avatar_uploaded">Avatar da Empresa Atualizado</option>
+                                    <option value="tenant_avatar_removed">Avatar da Empresa Removido</option>
+                                </optgroup>
+                                <optgroup label="Utilizadores">
+                                    <option value="user_created">Utilizador Criado</option>
+                                    <option value="user_updated">Utilizador Atualizado</option>
+                                    <option value="user_deleted">Utilizador Apagado</option>
+                                </optgroup>
+                                <optgroup label="Mapas">
+                                    <option value="map_created">Mapa Criado</option>
+                                    <option value="map_updated">Mapa Atualizado</option>
+                                    <option value="map_deleted">Mapa Apagado</option>
+                                </optgroup>
+                                <optgroup label="Tags">
+                                    <option value="tag_created">Tag Criada</option>
+                                    <option value="tag_deleted">Tag Apagada</option>
+                                    <option value="tag_aliases_updated">Alias de Tag(s) Atualizado</option>
+                                </optgroup>
+                                <optgroup label="Dados e Relatórios">
+                                    <option value="audit_report_viewed">Relatório de Auditoria Consultado</option>
+                                </optgroup>
                             </select>
                             <select id="logTimeFilter" class="form-select form-select-sm" style="width: auto;" onchange="reloadTenantSessionLogs()">
                                 <option value="-4h">Últimas 4 horas</option>
