@@ -1349,14 +1349,14 @@ def admin_audit_log(
     ts_inicio: Optional[str] = Query(None),
     ts_fim: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
-    page_size: int = Query(50, ge=1, le=200),
+    page_size: int = Query(50, ge=1, le=2000),
     _: dict = Depends(require_superadmin),
 ):
     """
     Log global de ações de utilizadores (system_access_log / InfluxDB).
     Filtros combinados em AND; resposta vazia em caso de erro — nunca HTTP 500.
     """
-    page_size = min(max(page_size, 1), 200)
+    page_size = min(max(page_size, 1), 2000)
     try:
         if tenant_id and not validar_tenant_id(tenant_id):
             return {

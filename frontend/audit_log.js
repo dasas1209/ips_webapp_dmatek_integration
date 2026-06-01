@@ -360,6 +360,8 @@ function configurarEventos() {
     });
 
     document.getElementById("btnLogout").addEventListener("click", fazerLogout);
+
+    document.getElementById("btnExportarPdf").addEventListener("click", exportarAuditLogPDF);
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
@@ -370,3 +372,249 @@ document.addEventListener("DOMContentLoaded", async () => {
     await carregarTenants();
     carregarAuditLog();
 });
+
+// ─── PDF Export ───────────────────────────────────────────────────────────────
+
+let _pdfLogoImg = null;
+let _pdfLogoOk = false;
+
+function _carregarLogoParaPdf() {
+    return new Promise((resolve) => {
+        if (_pdfLogoOk) { resolve(true); return; }
+        _pdfLogoImg = new Image();
+        _pdfLogoImg.onload = () => { _pdfLogoOk = true; resolve(true); };
+        _pdfLogoImg.onerror = () => resolve(false);
+        _pdfLogoImg.src = (window.ASSET_PATHS && window.ASSET_PATHS.LOGO) || "/static/assets/imgs/metric-logo.svg";
+    });
+}
+
+function _logoNaPagina(pdf, x, y, w, h) {
+    if (!_pdfLogoOk || !_pdfLogoImg) return;
+    const c = document.createElement("canvas");
+    c.width = 400; c.height = 150;
+    const ctx = c.getContext("2d");
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, c.width, c.height);
+    ctx.drawImage(_pdfLogoImg, 40, 45, 320, 60);
+    pdf.addImage(c.toDataURL("image/png"), "PNG", x, y, w, h);
+}
+
+function _resumoFiltros() {
+    const periodoLabels = { "24h": "Últimas 24 horas", "7d": "Últimos 7 dias", "30d": "Últimos 30 dias" };
+    const { tsInicio, tsFim } = obterFiltrosTemporais();
+    const periodo = els.filtroPeriodo.value;
+    const tenant  = els.filtroTenant.value.trim();
+    const username = els.filtroUsername.value.trim();
+    const acao    = els.filtroAcao.value.trim();
+    const detalhes = els.filtroDetalhes.value.trim();
+
+    const linhas = [
+        ["Cliente",    tenant   ? labelTenant(tenant)             : "Todos"],
+        ["Utilizador", username ? username                        : "Todos"],
+        ["Ação",       acao     ? (ACOES_LABEL[acao] || acao)     : "Todas"],
+    ];
+    if (detalhes) linhas.push(["Texto nos detalhes", detalhes]);
+    if (periodo === "custom") {
+        linhas.push(["De",  tsInicio ? new Date(tsInicio).toLocaleString("pt-PT") : "—"]);
+        linhas.push(["Até", tsFim    ? new Date(tsFim).toLocaleString("pt-PT")    : "Agora"]);
+    } else {
+        linhas.push(["Período", periodoLabels[periodo] || "Todo o histórico"]);
+    }
+    return linhas;
+}
+
+async function exportarAuditLogPDF() {
+    if (typeof window.jspdf === "undefined") {
+        alert("Biblioteca jsPDF não carregada. Verifique a ligação à internet.");
+        return;
+    }
+
+    const btn = document.getElementById("btnExportarPdf");
+    btn.disabled = true;
+    btn.textContent = "A gerar PDF…";
+
+    try {
+        await _carregarLogoParaPdf();
+
+        const params = construirQueryParams();
+        params.set("page", "1");
+        params.set("page_size", "2000");
+
+        const token = obterToken();
+        const resposta = await fetch(`/admin/audit-log?${params.toString()}`, {
+            headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!resposta.ok) {
+            const detalhe = await resposta.json().catch(() => ({}));
+            alert(`Erro ao obter dados para exportação (HTTP ${resposta.status}): ${JSON.stringify(detalhe.detail ?? detalhe)}`);
+            return;
+        }
+
+        const dados    = await resposta.json();
+        const eventos  = dados.resultados || [];
+        const total    = dados.total || 0;
+        const exportados = Math.min(total, 1000);
+
+        const { jsPDF } = window.jspdf;
+        const W = 210, H = 297;
+        const pdf = new jsPDF("p", "mm", "a4");
+
+        // ── Capa (navy) ──────────────────────────────────────────────
+        pdf.setFillColor(26, 31, 54);
+        pdf.rect(0, 0, W, H, "F");
+
+        _logoNaPagina(pdf, W / 2 - 35, 12, 70, 18);
+
+        pdf.setFillColor(255, 255, 255);
+        pdf.roundedRect(20, 40, W - 40, 62, 6, 6, "F");
+        pdf.setTextColor(26, 31, 54);
+        pdf.setFontSize(20);
+        pdf.setFont("helvetica", "bold");
+        pdf.text("LOG DE AÇÕES", W / 2, 60, { align: "center" });
+        pdf.text("DE UTILIZADORES", W / 2, 72, { align: "center" });
+        pdf.setFontSize(12);
+        pdf.setFont("helvetica", "normal");
+        pdf.text("Metric4 RTLS — Sistema de Auditoria", W / 2, 83, { align: "center" });
+        pdf.setFontSize(10);
+        const notaTotal = total > 1000
+            ? `${exportados} registos exportados (de ${total} encontrados)`
+            : `${exportados} registo(s) encontrado(s)`;
+        pdf.text(notaTotal, W / 2, 94, { align: "center" });
+
+        const resumo = _resumoFiltros();
+        pdf.setTextColor(200, 210, 230);
+        pdf.setFontSize(9);
+        let yFilt = 124;
+        pdf.setFont("helvetica", "bold");
+        pdf.text("FILTROS APLICADOS", W / 2, yFilt, { align: "center" });
+        yFilt += 8;
+        pdf.setFont("helvetica", "normal");
+        resumo.forEach(([label, valor]) => {
+            const valorLines = pdf.splitTextToSize(String(valor), 95);
+            pdf.setTextColor(180, 200, 240);
+            pdf.text(`${label}:`, 50, yFilt);
+            pdf.setTextColor(255, 255, 255);
+            pdf.text(valorLines, 107, yFilt);
+            yFilt += 7 * valorLines.length;
+        });
+
+        pdf.setTextColor(200, 210, 230);
+        pdf.setFontSize(9);
+        pdf.text(`Gerado em: ${new Date().toLocaleString("pt-PT")}`, W / 2, H - 28, { align: "center" });
+        pdf.setTextColor(80, 100, 140);
+        pdf.setFontSize(8);
+        pdf.text("Metric4 RTLS — Documento de Auditoria Confidencial", W / 2, H - 10, { align: "center" });
+
+        // ── Páginas de conteúdo ──────────────────────────────────────
+        const cabecalhos = ["Timestamp", "Tenant", "Utilizador", "Ação", "Detalhes"];
+        const larguras   = [38, 28, 28, 38, 58];
+        const xTbl = 10;
+        const alturaCab = 8;
+        const margemFundo = 14;
+        const passoLinha = 3.1;
+
+        const desenharCabecalho = (yTop) => {
+            pdf.setFillColor(26, 31, 54);
+            pdf.rect(xTbl, yTop, W - 20, alturaCab, "F");
+            pdf.setTextColor(255, 255, 255);
+            pdf.setFontSize(8);
+            pdf.setFont("helvetica", "bold");
+            let xH = xTbl + 2;
+            cabecalhos.forEach((h, i) => { pdf.text(h, xH, yTop + 5.5); xH += larguras[i]; });
+            return yTop + alturaCab;
+        };
+
+        const novaPaginaConteudo = (titulo) => {
+            pdf.addPage("a4", "p");
+            pdf.setFillColor(244, 246, 251);
+            pdf.rect(0, 0, W, H, "F");
+            _logoNaPagina(pdf, 10, 6, 42, 10);
+            pdf.setTextColor(26, 31, 54);
+            pdf.setFontSize(13);
+            pdf.setFont("helvetica", "bold");
+            pdf.text(titulo, W / 2, 18, { align: "center" });
+            pdf.setFontSize(9);
+            pdf.setFont("helvetica", "normal");
+            pdf.setTextColor(100, 120, 150);
+            pdf.text(`${exportados} registo(s) — exportado em ${new Date().toLocaleString("pt-PT")}`, W / 2, 25, { align: "center" });
+            return desenharCabecalho(30);
+        };
+
+        let y = novaPaginaConteudo("Log de Ações de Utilizadores");
+
+        if (eventos.length === 0) {
+            pdf.setTextColor(100, 120, 150);
+            pdf.setFontSize(11);
+            pdf.setFont("helvetica", "normal");
+            pdf.text("Nenhum registo encontrado para os filtros aplicados.", W / 2, y + 20, { align: "center" });
+        } else {
+            eventos.forEach((ev, idx) => {
+                pdf.setFontSize(7);
+                const detLines  = pdf.splitTextToSize(ev.detalhes  || "—",                  larguras[4] - 2);
+                const acaoLines = pdf.splitTextToSize(ACOES_LABEL[ev.acao] || ev.acao || "—", larguras[3] - 2);
+                const tenLines  = pdf.splitTextToSize(labelTenant(ev.tenant_id),              larguras[1] - 2);
+                const maxLinhas = Math.max(detLines.length, acaoLines.length, tenLines.length);
+                const rowH = Math.max(7, 4.2 + (maxLinhas - 1) * passoLinha);
+
+                if (y + rowH > H - margemFundo) {
+                    y = novaPaginaConteudo("Log de Ações (continuação)");
+                }
+
+                pdf.setFillColor(idx % 2 === 0 ? 255 : 248, idx % 2 === 0 ? 255 : 249, idx % 2 === 0 ? 255 : 255);
+                pdf.rect(xTbl, y, W - 20, rowH, "F");
+
+                let xL = xTbl + 2;
+                pdf.setFont("helvetica", "normal");
+                pdf.setTextColor(40, 50, 70);
+
+                // Timestamp (single line)
+                pdf.setFontSize(7.5);
+                pdf.text(formatarTimestamp(ev.timestamp), xL, y + 4.5);
+                xL += larguras[0];
+
+                // Tenant (multiline)
+                let yM = y + 3.6;
+                pdf.setFontSize(7);
+                tenLines.forEach((l) => { pdf.text(l, xL, yM); yM += passoLinha; });
+                xL += larguras[1];
+
+                // Username (single line)
+                pdf.setFontSize(7.5);
+                pdf.text(ev.username || "—", xL, y + 4.5);
+                xL += larguras[2];
+
+                // Ação (multiline)
+                yM = y + 3.6;
+                pdf.setFontSize(7);
+                acaoLines.forEach((l) => { pdf.text(l, xL, yM); yM += passoLinha; });
+                xL += larguras[3];
+
+                // Detalhes (multiline, muted color)
+                yM = y + 3.6;
+                pdf.setTextColor(55, 65, 90);
+                detLines.forEach((l) => { pdf.text(l, xL, yM); yM += passoLinha; });
+
+                y += rowH;
+            });
+        }
+
+        // Rodapé em todas as páginas
+        const totalPag = pdf.internal.getNumberOfPages();
+        for (let p = 1; p <= totalPag; p++) {
+            pdf.setPage(p);
+            pdf.setFontSize(7);
+            pdf.setTextColor(150, 160, 180);
+            pdf.text(`Metric4 RTLS — Log de Ações | Pág. ${p}/${totalPag}`, W / 2, H - 5, { align: "center" });
+        }
+
+        const dataStr = new Date().toISOString().slice(0, 10);
+        pdf.save(`audit_log_metric4_${dataStr}.pdf`);
+
+    } catch (err) {
+        console.error(err);
+        alert(`Erro ao gerar PDF: ${err.message}`);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = "⬇ Exportar PDF";
+    }
+}

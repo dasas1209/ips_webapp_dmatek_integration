@@ -8,6 +8,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/style.css?v=3.1">
+    <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
     <style>
         .audit-log-page {
             max-width: 1280px;
@@ -216,6 +217,7 @@
             <div class="filters-actions">
                 <button type="button" class="btn btn-primary" id="btnAplicar">Aplicar filtros</button>
                 <button type="button" class="btn btn-secondary" id="btnLimpar">Limpar tudo</button>
+                <button type="button" class="btn btn-secondary" id="btnExportarPdf">⬇ Exportar PDF</button>
                 <span class="muted">Enter num campo de pesquisa também aplica</span>
             </div>
         </section>
@@ -251,6 +253,6 @@
     </div>
 
     <script src="/static/auth.js"></script>
-    <script src="/static/audit_log.js?v=1.2"></script>
+    <script src="/static/audit_log.js?v=2.0"></script>
 </body>
 </html>
