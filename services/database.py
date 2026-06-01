@@ -14,9 +14,15 @@ _TENANT_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
 
 
 def get_db_connection() -> sqlite3.Connection:
-    """devolve ligacao sqlite com row_factory e fks activas"""
-    conn = sqlite3.connect(DB_PATH)
+    """devolve ligacao sqlite com row_factory e fks activos.
+    Tenta activar WAL (permite acesso concorrente sem lock total), mas não falha se a
+    transição não for possível (ex: outra conexão aberta em modo DELETE)."""
+    conn = sqlite3.connect(DB_PATH, timeout=10)
     conn.row_factory = sqlite3.Row
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+    except sqlite3.OperationalError:
+        pass  # DB ainda em DELETE mode; será migrada para WAL na próxima abertura exclusiva
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
 

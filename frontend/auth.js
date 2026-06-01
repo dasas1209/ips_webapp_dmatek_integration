@@ -31,9 +31,26 @@ function obterToken() {
         localStorage.removeItem("cracha_jwt");
         localStorage.removeItem("tenant_id");
         localStorage.removeItem("is_admin");
+        localStorage.removeItem("role");
         return null;
     }
     return localStorage.getItem("cracha_jwt");
+}
+
+/**
+ * devolve o role do utilizador autenticado: "superadmin" | "admin" | "user" | null
+ * lê sempre do token para evitar inconsistências com cache stale
+ * @returns {string|null}
+ */
+function obterRole() {
+    const token = obterToken();
+    if (!token) return null;
+    try {
+        const payload = JSON.parse(atob(token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
+        return payload.role || null;
+    } catch {
+        return null;
+    }
 }
 
 /**
