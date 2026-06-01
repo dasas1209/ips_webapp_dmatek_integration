@@ -1,5 +1,5 @@
 """
-escuta_dmatek.py
+worker/escuta_dmatek.py
 motor de escuta websocket dmatek para influxdb
 """
 
@@ -20,9 +20,10 @@ from config import (
     IP_SERVIDOR_DMATEK,
     PORTA_DMATEK,
     ENDPOINT_DMATEK,
+    MATRIZ_RELOAD_INTERVAL_SEG,
 )
-from services.database import carregar_matriz_clientes
-from services.influx_client import get_influx_client
+from app.services.database import carregar_matriz_clientes
+from app.services.influx_client import get_influx_client
 
 # write api sincrona (delegada para thread via asyncio.to_thread)
 _write_api = get_influx_client().write_api(write_options=SYNCHRONOUS)
@@ -33,8 +34,7 @@ registo_de_tags: dict[str, dict] = {}
 # mapeamento tag_id -> tenant_id (recarregado periodicamente)
 MATRIZ_CLIENTES: dict[str, str] = carregar_matriz_clientes()
 
-# intervalo de recarga do mapeamento em segundos
-_MATRIZ_RELOAD_INTERVAL_SEG = 300
+# intervalo de recarga do mapeamento em segundos (configuravel via MATRIZ_RELOAD_INTERVAL_SEG)
 
 
 # log de eventos criticos (measurement dedicada no influx — ver api /relatorio/dados)
@@ -95,7 +95,7 @@ async def recarregar_matriz_periodicamente() -> None:
     """recarrega mapeamento tag→tenant de 5 em 5 minutos — reconhece novas tags sem reiniciar"""
     global MATRIZ_CLIENTES
     while True:
-        await asyncio.sleep(_MATRIZ_RELOAD_INTERVAL_SEG)
+        await asyncio.sleep(MATRIZ_RELOAD_INTERVAL_SEG)
         nova = carregar_matriz_clientes()
         if nova:
             MATRIZ_CLIENTES = nova

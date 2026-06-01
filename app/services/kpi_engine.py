@@ -1,7 +1,7 @@
 """
-services/kpi_engine.py
+app/services/kpi_engine.py
 motor de calculo de kpis para posicoes de tags rtls
-logica pura sem i/o — chamada por api_dmatek.py
+logica pura sem i/o — chamada por app/main.py
 """
 
 import math

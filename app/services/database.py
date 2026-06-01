@@ -1,5 +1,5 @@
 """
-services/database.py
+app/services/database.py
 utilitarios de acesso a base de dados sqlite e validacao de tenant
 """
 
@@ -7,7 +7,7 @@ import re
 import sqlite3
 from pathlib import Path
 
-DB_PATH = Path(__file__).parent.parent / "metric4rtls_system.db"
+DB_PATH = Path(__file__).parent.parent.parent / "metric4rtls_system.db"
 
 # allowlist: apenas alfanumerico, underscore e hifen (max 64 chars)
 _TENANT_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")

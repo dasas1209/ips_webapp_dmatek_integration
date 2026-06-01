@@ -9,7 +9,13 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from config import INFLUX_BUCKET, INFLUX_ORG, LIMITE_DIAS_HISTORICO
+from config import (
+    AUDIT_LOG_INFLUX_LIMIT,
+    INFLUX_BUCKET,
+    INFLUX_ORG,
+    LIMITE_DIAS_HISTORICO,
+    SESSIONS_LOG_LIMIT,
+)
 from app.dependencies import _verificar_acesso_tenant, obter_payload_token, require_superadmin
 from app.services.database import validar_tenant_id
 from app.services.influx_client import get_influx_client
@@ -17,8 +23,6 @@ from app.services.influx_client import get_influx_client
 logger = logging.getLogger("metric4.api")
 
 router = APIRouter()
-
-_AUDIT_LOG_INFLUX_LIMIT = 10_000
 
 
 def _parse_query_ts(val: str) -> datetime:
@@ -68,7 +72,7 @@ def _carregar_system_access_log(start: str, stop: str, tenant_id: Optional[str] 
         |> pivot(rowKey:["_time"], columnKey:["_field"], valueColumn:"_value")
         |> group()
         |> sort(columns:["_time"], desc:true)
-        |> limit(n: {_AUDIT_LOG_INFLUX_LIMIT})
+        |> limit(n: {AUDIT_LOG_INFLUX_LIMIT})
     """
     resultados = get_influx_client().query_api().query(org=INFLUX_ORG, query=query)
     eventos: list[dict] = []
@@ -149,7 +153,7 @@ def admin_get_tenant_sessions(
         {action_filter}
         |> group()
         |> sort(columns:["_time"], desc:true)
-        |> limit(n: 500)
+        |> limit(n: {SESSIONS_LOG_LIMIT})
     """
     try:
         resultados = get_influx_client().query_api().query(org=INFLUX_ORG, query=query)

@@ -10,6 +10,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
 
+from config import MAX_AVATAR_BYTES
 from app.dependencies import log_audit_event, obter_payload_token
 from app.models import SelfCredentialsUpdate, TenantProfileUpdate
 from app.services.database import get_db_connection
@@ -22,7 +23,6 @@ router = APIRouter()
 AVATARS_FS_DIR = Path(__file__).parent.parent.parent / "frontend" / "assets" / "imgs" / "avatars"
 AVATARS_URL_PREFIX = "/static/assets/imgs/avatars/"
 ALLOWED_AVATAR_EXT = {".png", ".jpg", ".jpeg", ".webp"}
-MAX_AVATAR_BYTES = 2 * 1024 * 1024
 
 
 def _require_tenant_admin(payload: dict) -> str:

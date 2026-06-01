@@ -1,5 +1,5 @@
 """
-database_setup.py
+scripts/database_setup.py
 inicializacao e seeding da base de dados sqlite3 do sistema metric4 rtls
 """
 
@@ -8,14 +8,14 @@ import logging
 import sqlite3
 from pathlib import Path
 
-from services.database import get_db_connection
+from app.services.database import get_db_connection
 from config import ADMIN_TENANT_ID, ADMIN_USERNAME, ADMIN_PASSWORD
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger("metric4.db_setup")
 
-# caminho canonico da base de dados (sempre relativo ao script)
-BASE_DIR = Path(__file__).parent
+# raiz do projecto (um nivel acima de scripts/)
+BASE_DIR = Path(__file__).parent.parent
 DB_PATH  = BASE_DIR / "metric4rtls_system.db"
 
 # csvs de origem — apagados apos seeding bem-sucedido
