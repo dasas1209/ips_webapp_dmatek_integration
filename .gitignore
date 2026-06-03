@@ -27,7 +27,9 @@ env/
 *.db-journal
 
 # ficheiros de ambiente (todos os variantes)
+.env
 .env.*
+*.env
 !.env.example
 
 # sistema operativo
