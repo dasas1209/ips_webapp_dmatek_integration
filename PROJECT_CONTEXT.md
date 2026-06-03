@@ -1,6 +1,6 @@
 # Metric4 RTLS — Contexto do Projeto
 
-Sistema de localização em tempo real (RTLS) **multi-tenant** por triangulação UWB indoor.
+Sistema de localização em tempo real (RTLS) **multi-tenant** por triangulação UWB indoor.  
 Stack: Python 3.11+ · FastAPI · InfluxDB Cloud · SQLite3 · HTML/JS/CSS
 
 ---
@@ -8,28 +8,33 @@ Stack: Python 3.11+ · FastAPI · InfluxDB Cloud · SQLite3 · HTML/JS/CSS
 ## Arquitetura geral
 
 ```
-Servidor Dmatek (WebSocket ws://172.16.0.201:5002/TagPosition)
-        │  {"id_fisico":"TAG001","status":"OK","x":100.5,"y":45.3,"rssi":-45,"bateria":85}
+Servidor Dmatek (WebSocket ws://<IP_SERVIDOR_DMATEK>:<PORTA_DMATEK>/TagPosition)
+        │  pacote JSON: {TagID, PX, PY, NMTime, MType, Batt}
         ▼
-worker/escuta_dmatek.py  ← motor de captura (processo separado)
-  ├── posicao_tag        → InfluxDB  (coord_x/y, status, battery_percent, tag_id, tenant_id)
+worker/escuta_dmatek.py  ← processo separado (asyncio)
+  ├── posicao_tag        → InfluxDB  (coord_x/y, status, nm_time, bateria, tag_id, tenant_id)
   └── evento_auditoria   → InfluxDB  (EMERGENCY_BUTTON, OFFLINE_ALARM, ONLINE_RECOVERY)
         │
         ▼
 app/main.py (FastAPI/uvicorn :8000)
   ├── /app               → serve o frontend (index.html)
-  ├── /token             → login OAuth2, devolve JWT
+  ├── /login             → autenticação JWT (role: superadmin | admin | user)
   ├── /posicoes          → última posição por tag  (polling 2s)
   ├── /historico         → snapshot num instante passado (slider temporal)
   ├── /kpis              → KPIs do turno atual
   ├── /relatorio/dados   → trajetória + KPIs + log de incidentes (auditoria)
-  └── /admin/*           → CRUD de tenants, users, mapas, âncoras, tags
+  ├── /api/tenant/*      → branding, perfil, avatar do tenant
+  ├── /api/user/*        → credenciais do utilizador autenticado
+  ├── /admin/audit-log   → log global de acções (superadmin)
+  └── /api/admin/*       → CRUD completo (tenants, users, mapas, tags)
         │
         ▼
 frontend/
-  ├── index.html + app.js        → dashboard real-time (canvas + tabela)
-  ├── relatorio.html + relatorio.js  → gráficos Chart.js de KPIs
-  └── auditoria.html + auditoria.js  → trajetória esparguete + exportação PDF
+  ├── index.html + app.js           → dashboard real-time (canvas + tabela)
+  ├── relatorio.html + relatorio.js → gráficos Chart.js de KPIs
+  ├── auditoria.html + auditoria.js → trajetória esparguete + exportação PNG/PDF
+  ├── admin.html                    → painel de gestão Bootstrap (CRUD)
+  └── audit_log.html + audit_log.js → log de acções superadmin + exportação PDF
 ```
 
 ---
@@ -38,17 +43,38 @@ frontend/
 
 | Ficheiro | Responsabilidade |
 |---|---|
-| `config.py` | Lê `.env`, exporta constantes (INFLUX_*, SECRET_KEY, ALGORITHM, etc.) |
-| `scripts/database_setup.py` | Cria tabelas SQLite + seed inicial (correr uma vez) |
-| `worker/escuta_dmatek.py` | WebSocket listener → escrita InfluxDB (corre em janela separada) |
-| `app/main.py` | FastAPI app principal — todos os endpoints REST + autenticação |
-| `app/models.py` | Pydantic models (MapaCreate, UserCreate, etc.) |
-| `app/dependencies.py` | JWT, rate limiting, dependências partilhadas |
-| `app/routes/` | Endpoints por domínio (auth, realtime, kpis, admin, audit, tenant) |
+| `config.py` | Lê `.env`, valida `SECRET_KEY`, exporta todas as constantes do sistema |
+| `scripts/database_setup.py` | Cria tabelas SQLite + seed inicial (idempotente) |
+| `worker/escuta_dmatek.py` | WebSocket listener → escrita InfluxDB + detecção offline/recovery (asyncio) |
+| `app/main.py` | FastAPI app — CORS, mounts estáticos, startup hook |
+| `app/models.py` | Pydantic models (MapaCreate, UserCreate, TenantCreate, etc.) |
+| `app/dependencies.py` | JWT, rate limiting, roles, log de auditoria (TenantRateLimiter, log_audit_event) |
+| `app/state.py` | Cache em memória de utilizadores lidos da BD (recarregada após alterações de admin) |
+| `app/routes/auth.py` | `/login`, `/logout` — autenticação por users e por clientes |
+| `app/routes/realtime.py` | `/posicoes`, `/historico` — dados em tempo real e histórico |
+| `app/routes/kpis.py` | `/kpis`, `/relatorio/dados` — KPIs e dados de auditoria |
+| `app/routes/admin.py` | `/api/admin/*` — CRUD de tenants, users, mapas, tags |
+| `app/routes/audit.py` | `/admin/audit-log`, `/api/admin/*/sessions` — log de acções |
+| `app/routes/tenant.py` | `/api/tenant/*`, `/api/user/credentials` — perfil e branding |
 | `app/services/database.py` | `get_db_connection`, `validar_tenant_id`, `carregar_matriz_clientes`, `obter_limites_mapa` |
 | `app/services/influx_client.py` | Singleton do cliente InfluxDB (evita TCP/TLS por pedido) |
 | `app/services/kpi_engine.py` | `calcular_kpis(RegistoTag) → KpiTag` — função pura sem I/O |
 | `scripts/arrancar_sistema_v1.bat` | Arranque completo: pip install → DB setup → escuta → API → browser |
+
+---
+
+## Frontend — módulos JavaScript
+
+| Ficheiro | Responsabilidade |
+|---|---|
+| `auth.js` | JWT: `obterToken`, `obterTenantId`, `obterRole`, `obterNomeUtilizador`, `redirecionarSeNaoAutenticado` |
+| `app.js` | Dashboard: login, polling `/posicoes`, canvas operacional, tabela de assets, toasts |
+| `relatorio.js` | Fetch `/kpis`, renderização Chart.js (distância, utilização, bateria) |
+| `auditoria.js` | Fetch `/relatorio/dados`, canvas esparguete de trajetória, exportação PNG/PDF |
+| `audit_log.js` | Fetch `/admin/audit-log`, filtros, paginação, exportação PDF (superadmin) |
+| `pdf-utils.js` | Utilitários PDF partilhados: carregamento de logo, inserção em PDF, rodapé numerado |
+| `asset-paths.js` | Caminhos canónicos de imagens (`/static/assets/imgs/`), avatar fallback e iniciais |
+| `runtime-config.js` | Configuração runtime injectada no browser (timings, raios canvas, paths API, temas) |
 
 ---
 
@@ -104,8 +130,9 @@ frontend/
 
 | Measurement | Fields | Tags |
 |---|---|---|
-| `posicao_tag` | status, coord_x, coord_y, battery_percent | tag_id, tenant_id |
-| `evento_auditoria` | tipo, descricao | tag_id, tenant_id |
+| `posicao_tag` | `coord_x, coord_y, nm_time, status, bateria` | `tag_id, tenant_id` |
+| `evento_auditoria` | `descricao, coord_x, coord_y` | `tag_id, tenant_id, tipo` |
+| `system_access_log` | `action, details` | `user_id, tenant_id` |
 
 > Incidentes no relatório de auditoria provêm **exclusivamente** de `evento_auditoria`.
 > O campo `status` de `posicao_tag` serve apenas para KPIs (utilização), nunca gera incidentes.
@@ -114,21 +141,22 @@ frontend/
 
 ## Segurança e multi-tenancy
 
-- **JWT** com `python-jose`: login em `/token` (OAuth2 password flow)
-- **`require_tenant()`** dependency: injeta `tenant_id` do utilizador autenticado em todos os queries → isolamento de dados por tenant
-- **Rate limiting**: 120 req/60s por tenant; 10 req/60s por username no login
-- **Admin endpoints**: protegidos por role `admin`, CRUD completo com cascade delete
+- **JWT** com `python-jose`: login em `/login` (OAuth2 password flow) — roles: `superadmin`, `admin`, `user`
+- **`verificar_token()`** injecta `tenant_id` do JWT em todos os queries → isolamento por tenant
+- **Rate limiting**: 120 req/60s por tenant (endpoints normais); 10 req/60s por username (login)
+- **`require_admin()`** / **`require_superadmin()`**: protege endpoints admin com 403 se role insuficiente
+- **`_verificar_acesso_tenant()`**: superadmin acede a todos os tenants; admin apenas ao seu próprio
 
 ---
 
-## Frontend
+## Ficheiros de configuração
 
-- `auth.js`: `obterToken`, `obterTenantId`, `redirecionarSeNaoAutenticado`, `tokenExpirado` — JWT em localStorage
-- `app.js`: polling 2s a `/posicoes`, renderização canvas, tabela de assets, toasts de status
-- `relatorio.js`: fetch `/kpis`, gráficos Chart.js (distância, utilização, bateria)
-- `auditoria.js`: fetch `/relatorio/dados`, canvas esparguete de trajetória, exportação PNG/PDF (jsPDF)
-- `runtime-config.js`: limites de mapa, timings e paths injetados em runtime (sem hardcode no JS)
-- `asset-paths.js`: caminhos canónicos de imagens (`/static/assets/imgs/`, `imgs/maps/`, `imgs/avatars/`)
+| Ficheiro | Controla |
+|---|---|
+| `.env` | Credenciais e parâmetros de ambiente (não versionado) |
+| `.env.example` | Template documentado de todos os parâmetros |
+| `config.py` | Lê `.env`, valida `SECRET_KEY` e exporta constantes |
+| `frontend/runtime-config.js` | Timings de polling, raios do canvas, paths de API, paleta de cores, temas por tenant |
 
 ---
 
@@ -143,5 +171,5 @@ Sequência: `pip install` → `scripts/database_setup.py` → `worker/escuta_dma
 
 ## Contexto académico
 
-Projeto PEGI (Projeto de Engenharia e Gestão Industrial) — FEUP, 3.º ano, 2.º semestre.
+Projeto PEGI (Projeto de Engenharia e Gestão Industrial) — FEUP, 3.º ano, 2.º semestre.  
 Empresa parceira: **Metric4**. O sistema é deployado numa fábrica real para tracking de assets industriais.
