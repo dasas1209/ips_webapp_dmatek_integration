@@ -72,7 +72,7 @@ let msTenant = null;
 let msAcao = null;
 
 
-// ── componente multi-select ──────────────────────────────────────────────────
+// componente multi-select
 
 function criarMultiSelect({ container, opcoes, placeholderAll, comBusca = true, onChange }) {
     let _selected = new Set();
@@ -128,7 +128,6 @@ function criarMultiSelect({ container, opcoes, placeholderAll, comBusca = true, 
             ? _opcoes.filter(o => o.label.toLowerCase().includes(q) || o.value.toLowerCase().includes(q))
             : _opcoes;
 
-        // agrupa opcoes
         const grupos = new Map();
         const semGrupo = [];
         visiveis.forEach(o => {
@@ -270,7 +269,7 @@ function criarMultiSelect({ container, opcoes, placeholderAll, comBusca = true, 
 }
 
 
-// ── inicializacao ────────────────────────────────────────────────────────────
+// inicializacao
 
 function cacheElements() {
     els.body                    = document.getElementById("auditLogBody");
@@ -312,7 +311,7 @@ function verificarAcessoSuperadmin() {
 }
 
 
-// ── filtros e query ──────────────────────────────────────────────────────────
+// filtros e query
 
 function atualizarVisibilidadeDatasPersonalizadas() {
     const custom = els.filtroPeriodo.value === "custom";
@@ -351,7 +350,7 @@ function construirQueryParams() {
     params.set("sort_by",   state.sortBy);
     params.set("sort_dir",  state.sortDir);
 
-    // multi-select — um param por valor seleccionado
+    // append envia um param por valor (suporte a listas no fastapi)
     if (msTenant) msTenant.getSelected().forEach(id  => params.append("tenant_id", id));
     if (msAcao)   msAcao.getSelected().forEach(acao => params.append("acao", acao));
 
@@ -368,7 +367,7 @@ function construirQueryParams() {
 }
 
 
-// ── ordenacao ────────────────────────────────────────────────────────────────
+// ordenacao
 
 function atualizarIconesOrdenacao() {
     document.querySelectorAll("th.sortable").forEach(th => {
@@ -403,7 +402,7 @@ function configurarOrdenacao() {
 }
 
 
-// ── renderizacao ─────────────────────────────────────────────────────────────
+// renderizacao
 
 function formatarTimestamp(iso) {
     try {
@@ -459,7 +458,7 @@ function atualizarPaginacao() {
 }
 
 
-// ── dados ────────────────────────────────────────────────────────────────────
+// dados
 
 async function apiFetchAutenticado(url) {
     const token = obterToken();
@@ -605,7 +604,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 });
 
 
-// ── exportacao pdf ───────────────────────────────────────────────────────────
+// exportacao pdf
 
 function _resumoFiltros() {
     const periodoLabels = { "24h": "Últimas 24 horas", "7d": "Últimos 7 dias", "30d": "Últimos 30 dias" };
@@ -679,7 +678,6 @@ async function exportarAuditLogPDF() {
         const W = 210, H = 297;
         const pdf = new jsPDF("p", "mm", "a4");
 
-        // capa navy
         pdf.setFillColor(26, 31, 54);
         pdf.rect(0, 0, W, H, "F");
         PDF_UTILS.inserirLogo(pdf, W / 2 - 35, 12, 70, 18);
@@ -722,7 +720,6 @@ async function exportarAuditLogPDF() {
         pdf.setFontSize(8);
         pdf.text("Metric4 RTLS — Documento de Auditoria Confidencial", W / 2, H - 10, { align: "center" });
 
-        // paginas de conteudo
         const cabecalhos = ["Timestamp", "Tenant", "Utilizador", "Ação", "Detalhes"];
         const larguras   = [38, 28, 28, 38, 58];
         const xTbl = 10;

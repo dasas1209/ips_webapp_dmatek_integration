@@ -64,7 +64,6 @@ def _carregar_system_access_log(
     if not INFLUX_BUCKET or not INFLUX_ORG:
         return []
 
-    # constroi filtro de tenant em flux para push-down eficiente
     tenant_filter = ""
     if tenant_ids:
         if len(tenant_ids) == 1:
@@ -115,13 +114,11 @@ def admin_audit_log(
 ):
     page_size = min(max(page_size, 1), 2000)
 
-    # normaliza e valida parametros de ordenacao
     if sort_by not in _CAMPOS_ORDENACAO:
         sort_by = "timestamp"
     sort_dir = "asc" if sort_dir == "asc" else "desc"
 
     try:
-        # valida tenant_ids recebidos
         tenant_ids_validos: list[str] | None = None
         if tenant_id:
             tenant_ids_validos = [t for t in tenant_id if validar_tenant_id(t)]
@@ -142,7 +139,7 @@ def admin_audit_log(
             and _match_parcial_ci(e.get("detalhes"), detalhes)
         ]
 
-        # ordenacao em python — permite qualquer coluna sem nova query influx
+        # ordenacao em python evita nova query ao influx
         reverse = sort_dir == "desc"
         filtrados.sort(key=lambda e: (e.get(sort_by) or ""), reverse=reverse)
 
