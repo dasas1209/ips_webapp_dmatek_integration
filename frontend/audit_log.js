@@ -21,6 +21,8 @@ const ACOES_LABEL = {
     map_created: "Mapa criado",
     map_updated: "Mapa atualizado",
     map_deleted: "Mapa eliminado",
+    map_image_uploaded: "Imagem de mapa atualizada",
+    map_image_removed: "Imagem de mapa removida",
     // tags
     tag_created: "Tag criada",
     tag_deleted: "Tag eliminada",
@@ -45,6 +47,8 @@ const ACOES_OPCOES = [
     { group: "Mapas",            value: "map_created",            label: "Mapa criado" },
     { group: "Mapas",            value: "map_updated",            label: "Mapa atualizado" },
     { group: "Mapas",            value: "map_deleted",            label: "Mapa eliminado" },
+    { group: "Mapas",            value: "map_image_uploaded",     label: "Imagem de mapa atualizada" },
+    { group: "Mapas",            value: "map_image_removed",      label: "Imagem de mapa removida" },
     { group: "Tags",             value: "tag_created",            label: "Tag criada" },
     { group: "Tags",             value: "tag_deleted",            label: "Tag eliminada" },
     { group: "Tags",             value: "tag_aliases_updated",    label: "Nomes de tags atualizados" },
