@@ -23,7 +23,7 @@ _NO_CACHE = {"Cache-Control": "no-cache, no-store, must-revalidate"}
 app = FastAPI(
     title="Portal de Dados RTLS — Metric4",
     description="API de Gestao Multi-Tenant para posicoes em tempo real.",
-    version="2.1.0",
+    version=API_BUILD_ID,
 )
 
 app.add_middleware(

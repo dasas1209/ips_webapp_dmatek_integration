@@ -73,7 +73,11 @@ def obter_payload_token(token: str = Depends(oauth2_scheme)) -> dict:
 
 
 def verificar_token(payload: dict = Depends(obter_payload_token)) -> str:
-    return payload["tenant_id"]
+    # valida formato do tenant_id para prevenir flux injection via jwt forjado
+    tenant_id = payload["tenant_id"]
+    if not validar_tenant_id(tenant_id):
+        raise HTTPException(status_code=401, detail="tenant_id invalido no token.")
+    return tenant_id
 
 # roles
 
