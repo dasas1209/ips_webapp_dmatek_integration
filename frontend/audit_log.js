@@ -29,6 +29,28 @@ const ACOES_LABEL = {
     audit_report_viewed: "Relatório de auditoria consultado",
 };
 
+const ACOES_OPCOES = [
+    { group: "Sessão",           value: "login",                  label: "Início de sessão" },
+    { group: "Sessão",           value: "logout",                 label: "Fim de sessão" },
+    { group: "Sessão",           value: "credentials_updated",    label: "Credenciais alteradas" },
+    { group: "Clientes",         value: "tenant_created",         label: "Cliente criado" },
+    { group: "Clientes",         value: "tenant_updated",         label: "Cliente atualizado" },
+    { group: "Clientes",         value: "tenant_deleted",         label: "Cliente eliminado" },
+    { group: "Perfil",           value: "tenant_profile_updated", label: "Perfil da empresa atualizado" },
+    { group: "Perfil",           value: "tenant_avatar_uploaded", label: "Avatar atualizado" },
+    { group: "Perfil",           value: "tenant_avatar_removed",  label: "Avatar removido" },
+    { group: "Utilizadores",     value: "user_created",           label: "Utilizador criado" },
+    { group: "Utilizadores",     value: "user_updated",           label: "Utilizador atualizado" },
+    { group: "Utilizadores",     value: "user_deleted",           label: "Utilizador eliminado" },
+    { group: "Mapas",            value: "map_created",            label: "Mapa criado" },
+    { group: "Mapas",            value: "map_updated",            label: "Mapa atualizado" },
+    { group: "Mapas",            value: "map_deleted",            label: "Mapa eliminado" },
+    { group: "Tags",             value: "tag_created",            label: "Tag criada" },
+    { group: "Tags",             value: "tag_deleted",            label: "Tag eliminada" },
+    { group: "Tags",             value: "tag_aliases_updated",    label: "Nomes de tags atualizados" },
+    { group: "Relatórios",       value: "audit_report_viewed",    label: "Relatório de auditoria consultado" },
+];
+
 const PERIODOS_MS = {
     "24h": 24 * 60 * 60 * 1000,
     "7d": 7 * 24 * 60 * 60 * 1000,
@@ -41,41 +63,256 @@ const state = {
     total: 0,
     loading: false,
     tenants: [],
+    sortBy: "timestamp",
+    sortDir: "desc",
 };
 
 const els = {};
+let msTenant = null;
+let msAcao = null;
+
+
+// ── componente multi-select ──────────────────────────────────────────────────
+
+function criarMultiSelect({ container, opcoes, placeholderAll, comBusca = true, onChange }) {
+    let _selected = new Set();
+    let _opcoes = opcoes;
+    let _isOpen = false;
+
+    container.classList.add("ms-wrap");
+
+    const trigger = document.createElement("button");
+    trigger.type = "button";
+    trigger.className = "ms-trigger";
+    trigger.setAttribute("aria-haspopup", "listbox");
+    trigger.setAttribute("aria-expanded", "false");
+
+    const dropdown = document.createElement("div");
+    dropdown.className = "ms-dropdown escondido";
+    dropdown.setAttribute("role", "listbox");
+    dropdown.setAttribute("aria-multiselectable", "true");
+
+    container.appendChild(trigger);
+    container.appendChild(dropdown);
+
+    function _escapeHtml(str) {
+        const d = document.createElement("div");
+        d.textContent = str ?? "";
+        return d.innerHTML;
+    }
+
+    function _renderTrigger() {
+        const count = _selected.size;
+        if (count === 0) {
+            trigger.innerHTML = `
+                <span class="ms-trigger-text">${_escapeHtml(placeholderAll)}</span>
+                <span class="ms-chevron">▾</span>`;
+        } else {
+            const labels = [..._selected].map(v => {
+                const op = _opcoes.find(o => o.value === v);
+                return op ? op.label : v;
+            });
+            const preview = count <= 2
+                ? labels.join(", ")
+                : `${labels.slice(0, 2).join(", ")} +${count - 2}`;
+            trigger.innerHTML = `
+                <span class="ms-trigger-text tem-selecao">${_escapeHtml(preview)}</span>
+                <span class="ms-badge">${count}</span>
+                <span class="ms-chevron">▾</span>`;
+        }
+    }
+
+    function _renderDropdown(filtro = "") {
+        const q = filtro.toLowerCase();
+        const visiveis = q
+            ? _opcoes.filter(o => o.label.toLowerCase().includes(q) || o.value.toLowerCase().includes(q))
+            : _opcoes;
+
+        // agrupa opcoes
+        const grupos = new Map();
+        const semGrupo = [];
+        visiveis.forEach(o => {
+            if (o.group) {
+                if (!grupos.has(o.group)) grupos.set(o.group, []);
+                grupos.get(o.group).push(o);
+            } else {
+                semGrupo.push(o);
+            }
+        });
+
+        const html = [];
+
+        if (comBusca) {
+            html.push(`<div class="ms-search-wrap">
+                <input type="search" class="ms-search" placeholder="Pesquisar…" autocomplete="off"
+                       aria-label="Pesquisar opções" value="${_escapeHtml(filtro)}">
+            </div>`);
+        }
+
+        const countLabel = visiveis.length < _opcoes.length
+            ? `<span class="ms-ctrl-count">${visiveis.length}/${_opcoes.length}</span>` : "";
+        html.push(`<div class="ms-controls">
+            <button type="button" class="ms-ctrl-btn" data-ms="all">Selecionar tudo</button>
+            <span class="ms-ctrl-sep"></span>
+            <button type="button" class="ms-ctrl-btn" data-ms="none">Limpar</button>
+            ${countLabel}
+        </div>`);
+
+        html.push('<div class="ms-list" role="group">');
+
+        if (visiveis.length === 0) {
+            html.push('<div class="ms-empty">Sem resultados para a pesquisa</div>');
+        }
+
+        const _opcaoHtml = (o) => {
+            const chk = _selected.has(o.value) ? "checked" : "";
+            return `<label class="ms-option">
+                <input type="checkbox" value="${_escapeHtml(o.value)}" ${chk}
+                       role="option" aria-selected="${_selected.has(o.value)}">
+                <span>${_escapeHtml(o.label)}</span>
+            </label>`;
+        };
+
+        semGrupo.forEach(o => { html.push(_opcaoHtml(o)); });
+
+        grupos.forEach((opts, grupo) => {
+            html.push(`<div class="ms-group-label">${_escapeHtml(grupo)}</div>`);
+            opts.forEach(o => { html.push(_opcaoHtml(o)); });
+        });
+
+        html.push("</div>");
+        dropdown.innerHTML = html.join("");
+        _bindDropdownEvents(filtro);
+    }
+
+    function _bindDropdownEvents(filtroAtual = "") {
+        if (comBusca) {
+            const searchEl = dropdown.querySelector(".ms-search");
+            if (searchEl) {
+                searchEl.addEventListener("input", () => _renderDropdown(searchEl.value));
+                searchEl.addEventListener("click", e => e.stopPropagation());
+                searchEl.addEventListener("keydown", e => {
+                    if (e.key === "Escape") { e.stopPropagation(); _close(); trigger.focus(); }
+                });
+            }
+        }
+
+        dropdown.querySelectorAll("[data-ms]").forEach(btn => {
+            btn.addEventListener("click", e => {
+                e.stopPropagation();
+                if (btn.dataset.ms === "all") {
+                    _opcoes.forEach(o => _selected.add(o.value));
+                } else {
+                    _selected.clear();
+                }
+                const q = comBusca ? (dropdown.querySelector(".ms-search")?.value || "") : "";
+                _renderDropdown(q);
+                _renderTrigger();
+                onChange?.();
+            });
+        });
+
+        dropdown.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+            cb.addEventListener("change", e => {
+                e.stopPropagation();
+                cb.checked ? _selected.add(cb.value) : _selected.delete(cb.value);
+                _renderTrigger();
+                onChange?.();
+            });
+        });
+    }
+
+    function _open() {
+        _isOpen = true;
+        dropdown.classList.remove("escondido");
+        trigger.setAttribute("aria-expanded", "true");
+        _renderDropdown();
+        const searchEl = dropdown.querySelector(".ms-search");
+        if (searchEl) setTimeout(() => searchEl.focus(), 40);
+    }
+
+    function _close() {
+        _isOpen = false;
+        dropdown.classList.add("escondido");
+        trigger.setAttribute("aria-expanded", "false");
+    }
+
+    trigger.addEventListener("click", e => {
+        e.stopPropagation();
+        _isOpen ? _close() : _open();
+    });
+
+    trigger.addEventListener("keydown", e => {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); _isOpen ? _close() : _open(); }
+        if (e.key === "Escape") _close();
+    });
+
+    document.addEventListener("click", e => {
+        if (_isOpen && !container.contains(e.target)) _close();
+    });
+
+    _renderTrigger();
+
+    return {
+        getSelected() { return new Set(_selected); },
+        reset() {
+            _selected.clear();
+            _renderTrigger();
+            if (_isOpen) _renderDropdown();
+        },
+        setOpcoes(novas) {
+            _opcoes = novas;
+            _selected = new Set([..._selected].filter(v => novas.some(o => o.value === v)));
+            _renderTrigger();
+            if (_isOpen) _renderDropdown();
+        },
+    };
+}
+
+
+// ── inicializacao ────────────────────────────────────────────────────────────
 
 function cacheElements() {
-    els.body = document.getElementById("auditLogBody");
-    els.paginacaoInfo = document.getElementById("paginacaoInfo");
-    els.btnAnterior = document.getElementById("btnAnterior");
-    els.btnProximo = document.getElementById("btnProximo");
-    els.filtroTenant = document.getElementById("filtroTenant");
-    els.filtroUsername = document.getElementById("filtroUsername");
-    els.filtroAcao = document.getElementById("filtroAcao");
-    els.filtroDetalhes = document.getElementById("filtroDetalhes");
-    els.filtroPeriodo = document.getElementById("filtroPeriodo");
+    els.body                    = document.getElementById("auditLogBody");
+    els.paginacaoInfo           = document.getElementById("paginacaoInfo");
+    els.btnAnterior             = document.getElementById("btnAnterior");
+    els.btnProximo              = document.getElementById("btnProximo");
+    els.filtroUsername          = document.getElementById("filtroUsername");
+    els.filtroDetalhes          = document.getElementById("filtroDetalhes");
+    els.filtroPeriodo           = document.getElementById("filtroPeriodo");
     els.filtroDatasPersonalizadas = document.getElementById("filtroDatasPersonalizadas");
-    els.filtroTsInicio = document.getElementById("filtroTsInicio");
-    els.filtroTsFim = document.getElementById("filtroTsFim");
+    els.filtroTsInicio          = document.getElementById("filtroTsInicio");
+    els.filtroTsFim             = document.getElementById("filtroTsFim");
+}
+
+function inicializarMultiSelects() {
+    msTenant = criarMultiSelect({
+        container: document.getElementById("filtroTenant"),
+        opcoes: [],
+        placeholderAll: "Todos os clientes",
+        comBusca: true,
+        onChange: aplicarFiltros,
+    });
+
+    msAcao = criarMultiSelect({
+        container: document.getElementById("filtroAcao"),
+        opcoes: ACOES_OPCOES,
+        placeholderAll: "Todas as acções",
+        comBusca: true,
+        onChange: aplicarFiltros,
+    });
 }
 
 function verificarAcessoSuperadmin() {
-    if (!obterToken()) {
-        window.location.href = "/";
-        return false;
-    }
+    if (!obterToken()) { window.location.href = "/"; return false; }
     const role = obterRole();
-    if (role === "admin") {
-        window.location.href = "/admin.html";
-        return false;
-    }
-    if (role !== "superadmin") {
-        window.location.href = "/app";
-        return false;
-    }
+    if (role === "admin") { window.location.href = "/admin.html"; return false; }
+    if (role !== "superadmin") { window.location.href = "/app"; return false; }
     return true;
 }
+
+
+// ── filtros e query ──────────────────────────────────────────────────────────
 
 function atualizarVisibilidadeDatasPersonalizadas() {
     const custom = els.filtroPeriodo.value === "custom";
@@ -92,18 +329,15 @@ function datetimeLocalParaIso(val) {
 
 function obterFiltrosTemporais() {
     const periodo = els.filtroPeriodo.value;
-
     if (periodo === "custom") {
         return {
             tsInicio: datetimeLocalParaIso(els.filtroTsInicio.value),
-            tsFim: datetimeLocalParaIso(els.filtroTsFim.value),
+            tsFim:    datetimeLocalParaIso(els.filtroTsFim.value),
         };
     }
-
     if (!periodo || !PERIODOS_MS[periodo]) {
         return { tsInicio: null, tsFim: null };
     }
-
     return {
         tsInicio: new Date(Date.now() - PERIODOS_MS[periodo]).toISOString(),
         tsFim: null,
@@ -112,38 +346,72 @@ function obterFiltrosTemporais() {
 
 function construirQueryParams() {
     const params = new URLSearchParams();
-    params.set("page", String(state.page));
+    params.set("page",      String(state.page));
     params.set("page_size", String(state.pageSize));
+    params.set("sort_by",   state.sortBy);
+    params.set("sort_dir",  state.sortDir);
 
-    const tenant = els.filtroTenant.value.trim();
+    // multi-select — um param por valor seleccionado
+    if (msTenant) msTenant.getSelected().forEach(id  => params.append("tenant_id", id));
+    if (msAcao)   msAcao.getSelected().forEach(acao => params.append("acao", acao));
+
     const username = els.filtroUsername.value.trim();
-    const acao = els.filtroAcao.value.trim();
     const detalhes = els.filtroDetalhes.value.trim();
     const { tsInicio, tsFim } = obterFiltrosTemporais();
 
-    if (tenant) params.set("tenant_id", tenant);
-    if (username) params.set("username", username);
-    if (acao) params.set("acao", acao);
-    if (detalhes) params.set("detalhes", detalhes);
+    if (username) params.set("username",  username);
+    if (detalhes) params.set("detalhes",  detalhes);
     if (tsInicio) params.set("ts_inicio", tsInicio);
-    if (tsFim) params.set("ts_fim", tsFim);
+    if (tsFim)    params.set("ts_fim",    tsFim);
 
     return params;
 }
 
+
+// ── ordenacao ────────────────────────────────────────────────────────────────
+
+function atualizarIconesOrdenacao() {
+    document.querySelectorAll("th.sortable").forEach(th => {
+        const col  = th.dataset.col;
+        const icon = th.querySelector(".sort-icon");
+        if (!icon) return;
+        if (col === state.sortBy) {
+            th.classList.add("sort-active");
+            icon.textContent = state.sortDir === "desc" ? "▼" : "▲";
+        } else {
+            th.classList.remove("sort-active");
+            icon.textContent = "⇅";
+        }
+    });
+}
+
+function configurarOrdenacao() {
+    document.querySelectorAll("th.sortable").forEach(th => {
+        th.addEventListener("click", () => {
+            const col = th.dataset.col;
+            if (state.sortBy === col) {
+                state.sortDir = state.sortDir === "desc" ? "asc" : "desc";
+            } else {
+                state.sortBy  = col;
+                state.sortDir = "desc";
+            }
+            atualizarIconesOrdenacao();
+            state.page = 1;
+            carregarAuditLog();
+        });
+    });
+}
+
+
+// ── renderizacao ─────────────────────────────────────────────────────────────
+
 function formatarTimestamp(iso) {
     try {
         return new Date(iso).toLocaleString("pt-PT", {
-            year: "numeric",
-            month: "2-digit",
-            day: "2-digit",
-            hour: "2-digit",
-            minute: "2-digit",
-            second: "2-digit",
+            year: "numeric", month: "2-digit", day: "2-digit",
+            hour: "2-digit", minute: "2-digit", second: "2-digit",
         });
-    } catch {
-        return iso || "—";
-    }
+    } catch { return iso || "—"; }
 }
 
 function labelAcao(codigo) {
@@ -151,10 +419,8 @@ function labelAcao(codigo) {
 }
 
 function labelTenant(tenantId) {
-    const t = state.tenants.find((c) => c.id === tenantId);
-    if (t && t.nome && t.nome !== tenantId) {
-        return `${t.nome} (${tenantId})`;
-    }
+    const t = state.tenants.find(c => c.id === tenantId);
+    if (t && t.nome && t.nome !== tenantId) return `${t.nome} (${tenantId})`;
     return tenantId || "—";
 }
 
@@ -174,41 +440,34 @@ function renderizarTabela(resultados) {
             '<tr><td colspan="5" class="muted" style="text-align:center;padding:28px;">Nenhum registo encontrado para os filtros aplicados.</td></tr>';
         return;
     }
-
-    els.body.innerHTML = resultados
-        .map(
-            (r) => `
+    els.body.innerHTML = resultados.map(r => `
         <tr>
             <td>${formatarTimestamp(r.timestamp)}</td>
             <td title="${escapeHtml(r.tenant_id)}">${escapeHtml(labelTenant(r.tenant_id))}</td>
             <td>${escapeHtml(r.username)}</td>
             <td><span class="acao-badge" title="${escapeHtml(r.acao)}">${escapeHtml(labelAcao(r.acao))}</span></td>
             <td class="detalhes-cell">${escapeHtml(r.detalhes)}</td>
-        </tr>`
-        )
-        .join("");
+        </tr>`).join("");
 }
 
 function atualizarPaginacao() {
     const totalPaginas = Math.max(1, Math.ceil(state.total / state.pageSize));
-    els.paginacaoInfo.textContent = `Página ${state.page} de ${totalPaginas} (${state.total} resultados)`;
+    els.paginacaoInfo.textContent =
+        `Página ${state.page} de ${totalPaginas} (${state.total} resultados)`;
     els.btnAnterior.disabled = state.page <= 1 || state.loading;
-    els.btnProximo.disabled = state.page >= totalPaginas || state.total === 0 || state.loading;
+    els.btnProximo.disabled  = state.page >= totalPaginas || state.total === 0 || state.loading;
 }
+
+
+// ── dados ────────────────────────────────────────────────────────────────────
 
 async function apiFetchAutenticado(url) {
     const token = obterToken();
     if (!token) return null;
-    const resposta = await fetch(url, {
-        headers: { Authorization: `Bearer ${token}` },
-    });
-    if (resposta.status === 401) {
-        window.location.href = "/";
-        return null;
-    }
+    const resposta = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    if (resposta.status === 401) { window.location.href = "/"; return null; }
     if (resposta.status === 403) {
-        const role = obterRole();
-        window.location.href = role === "admin" ? "/admin.html" : "/app";
+        window.location.href = obterRole() === "admin" ? "/admin.html" : "/app";
         return null;
     }
     return resposta;
@@ -218,22 +477,20 @@ async function carregarTenants() {
     try {
         const resposta = await apiFetchAutenticado("/api/admin/tenants");
         if (!resposta?.ok) return;
-
         const lista = await resposta.json();
         state.tenants = Array.isArray(lista) ? lista : [];
 
-        const opts = ['<option value="">Todos os clientes</option>'];
-        state.tenants
+        const ordenados = state.tenants
             .slice()
-            .sort((a, b) => (a.nome || a.id).localeCompare(b.nome || b.id, "pt"))
-            .forEach((c) => {
-                const nome = escapeHtml(c.nome || c.id);
-                const id = escapeHtml(c.id);
-                opts.push(`<option value="${id}">${nome} — ${id}</option>`);
-            });
-        els.filtroTenant.innerHTML = opts.join("");
+            .sort((a, b) => (a.nome || a.id).localeCompare(b.nome || b.id, "pt"));
+
+        const opcoes = ordenados.map(c => ({
+            value: c.id,
+            label: c.nome && c.nome !== c.id ? `${c.nome} — ${c.id}` : c.id,
+        }));
+        msTenant.setOpcoes(opcoes);
     } catch {
-        /* mantem opcao todos */
+        /* mantem placeholder vazio */
     }
 }
 
@@ -243,27 +500,17 @@ async function carregarAuditLog() {
     atualizarPaginacao();
 
     const token = obterToken();
-    if (!token) {
-        state.loading = false;
-        window.location.href = "/";
-        return;
-    }
+    if (!token) { state.loading = false; window.location.href = "/"; return; }
 
     let resultados = [];
-
     try {
         const params = construirQueryParams();
         const resposta = await fetch(`/admin/audit-log?${params.toString()}`, {
             headers: { Authorization: `Bearer ${token}` },
         });
-
-        if (resposta.status === 401) {
-            window.location.href = "/";
-            return;
-        }
+        if (resposta.status === 401) { window.location.href = "/"; return; }
         if (resposta.status === 403) {
-            const role = obterRole();
-            window.location.href = role === "admin" ? "/admin.html" : "/app";
+            window.location.href = obterRole() === "admin" ? "/admin.html" : "/app";
             return;
         }
 
@@ -271,13 +518,13 @@ async function carregarAuditLog() {
             ? await resposta.json()
             : { total: 0, page: state.page, page_size: state.pageSize, resultados: [] };
 
-        state.total = dados.total ?? 0;
-        state.page = dados.page ?? state.page;
+        state.total    = dados.total    ?? 0;
+        state.page     = dados.page     ?? state.page;
         state.pageSize = dados.page_size ?? state.pageSize;
-        resultados = dados.resultados || [];
+        resultados     = dados.resultados || [];
     } catch {
         state.total = 0;
-        resultados = [];
+        resultados  = [];
     } finally {
         state.loading = false;
         renderizarTabela(resultados);
@@ -291,110 +538,96 @@ function aplicarFiltros() {
 }
 
 function limparFiltros() {
-    els.filtroTenant.value = "";
-    els.filtroUsername.value = "";
-    els.filtroAcao.value = "";
-    els.filtroDetalhes.value = "";
-    els.filtroPeriodo.value = "";
-    els.filtroTsInicio.value = "";
-    els.filtroTsFim.value = "";
+    msTenant?.reset();
+    msAcao?.reset();
+    els.filtroUsername.value  = "";
+    els.filtroDetalhes.value  = "";
+    els.filtroPeriodo.value   = "";
+    els.filtroTsInicio.value  = "";
+    els.filtroTsFim.value     = "";
+    state.sortBy  = "timestamp";
+    state.sortDir = "desc";
     atualizarVisibilidadeDatasPersonalizadas();
+    atualizarIconesOrdenacao();
     state.page = 1;
     carregarAuditLog();
 }
 
 async function fazerLogout() {
     const token = obterToken();
-    if (token) {
-        fetch("/logout", {
-            method: "POST",
-            headers: { Authorization: `Bearer ${token}` },
-        }).catch(() => {});
-    }
-    localStorage.removeItem("cracha_jwt");
-    localStorage.removeItem("tenant_id");
-    localStorage.removeItem("tenant_nome");
-    localStorage.removeItem("is_admin");
-    localStorage.removeItem("role");
-    localStorage.removeItem("login_timestamp");
+    if (token) fetch("/logout", { method: "POST", headers: { Authorization: `Bearer ${token}` } }).catch(() => {});
+    ["cracha_jwt", "tenant_id", "tenant_nome", "is_admin", "role", "login_timestamp"]
+        .forEach(k => localStorage.removeItem(k));
     window.location.href = "/";
 }
 
 function configurarEventos() {
     document.getElementById("btnAplicar").addEventListener("click", aplicarFiltros);
-
     document.getElementById("btnLimpar").addEventListener("click", limparFiltros);
+    document.getElementById("btnVoltarAdmin").addEventListener("click", () => { window.location.href = "/admin.html"; });
+    document.getElementById("btnLogout").addEventListener("click", fazerLogout);
+    document.getElementById("btnExportarPdf").addEventListener("click", exportarAuditLogPDF);
 
     els.filtroPeriodo.addEventListener("change", () => {
         atualizarVisibilidadeDatasPersonalizadas();
         if (els.filtroPeriodo.value !== "custom") {
             els.filtroTsInicio.value = "";
-            els.filtroTsFim.value = "";
+            els.filtroTsFim.value   = "";
         }
     });
 
-    [els.filtroUsername, els.filtroDetalhes].forEach((input) => {
-        input.addEventListener("keydown", (ev) => {
-            if (ev.key === "Enter") {
-                ev.preventDefault();
-                aplicarFiltros();
-            }
+    [els.filtroUsername, els.filtroDetalhes].forEach(input => {
+        input.addEventListener("keydown", ev => {
+            if (ev.key === "Enter") { ev.preventDefault(); aplicarFiltros(); }
         });
     });
 
-    els.filtroTenant.addEventListener("change", () => {
-        /* aplicacao imediata ao escolher cliente */
-        aplicarFiltros();
+    els.btnAnterior.addEventListener("click", () => {
+        if (state.page > 1) { state.page -= 1; carregarAuditLog(); }
     });
-
-    els.filtroAcao.addEventListener("change", aplicarFiltros);
-
-    document.getElementById("btnAnterior").addEventListener("click", () => {
-        if (state.page > 1) {
-            state.page -= 1;
-            carregarAuditLog();
-        }
-    });
-
-    document.getElementById("btnProximo").addEventListener("click", () => {
+    els.btnProximo.addEventListener("click", () => {
         const totalPaginas = Math.ceil(state.total / state.pageSize);
-        if (state.page < totalPaginas) {
-            state.page += 1;
-            carregarAuditLog();
-        }
+        if (state.page < totalPaginas) { state.page += 1; carregarAuditLog(); }
     });
 
-    document.getElementById("btnVoltarAdmin").addEventListener("click", () => {
-        window.location.href = "/admin.html";
-    });
-
-    document.getElementById("btnLogout").addEventListener("click", fazerLogout);
-
-    document.getElementById("btnExportarPdf").addEventListener("click", exportarAuditLogPDF);
+    configurarOrdenacao();
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
     cacheElements();
     if (!verificarAcessoSuperadmin()) return;
+    inicializarMultiSelects();
     atualizarVisibilidadeDatasPersonalizadas();
+    atualizarIconesOrdenacao();
     configurarEventos();
     await carregarTenants();
     carregarAuditLog();
 });
 
+
+// ── exportacao pdf ───────────────────────────────────────────────────────────
+
 function _resumoFiltros() {
     const periodoLabels = { "24h": "Últimas 24 horas", "7d": "Últimos 7 dias", "30d": "Últimos 30 dias" };
     const { tsInicio, tsFim } = obterFiltrosTemporais();
-    const periodo = els.filtroPeriodo.value;
-    const tenant  = els.filtroTenant.value.trim();
+    const periodo  = els.filtroPeriodo.value;
     const username = els.filtroUsername.value.trim();
-    const acao    = els.filtroAcao.value.trim();
     const detalhes = els.filtroDetalhes.value.trim();
 
+    const selectedTenants = msTenant ? [...msTenant.getSelected()] : [];
+    const selectedAcoes   = msAcao   ? [...msAcao.getSelected()]   : [];
+
+    const tenantLabel = selectedTenants.length === 0
+        ? "Todos"
+        : selectedTenants.map(id => labelTenant(id)).join(", ");
+    const acaoLabel = selectedAcoes.length === 0
+        ? "Todas"
+        : selectedAcoes.map(a => ACOES_LABEL[a] || a).join(", ");
+
     const linhas = [
-        ["Cliente",    tenant   ? labelTenant(tenant)             : "Todos"],
-        ["Utilizador", username ? username                        : "Todos"],
-        ["Ação",       acao     ? (ACOES_LABEL[acao] || acao)     : "Todas"],
+        ["Cliente",    tenantLabel],
+        ["Utilizador", username || "Todos"],
+        ["Ação",       acaoLabel],
     ];
     if (detalhes) linhas.push(["Texto nos detalhes", detalhes]);
     if (periodo === "custom") {
@@ -402,6 +635,10 @@ function _resumoFiltros() {
         linhas.push(["Até", tsFim    ? new Date(tsFim).toLocaleString("pt-PT")    : "Agora"]);
     } else {
         linhas.push(["Período", periodoLabels[periodo] || "Todo o histórico"]);
+    }
+    if (state.sortBy !== "timestamp" || state.sortDir !== "desc") {
+        const colLabel = { timestamp: "Timestamp", tenant_id: "Tenant", username: "Utilizador", acao: "Ação" };
+        linhas.push(["Ordenação", `${colLabel[state.sortBy] || state.sortBy} ${state.sortDir === "asc" ? "↑" : "↓"}`]);
     }
     return linhas;
 }
@@ -442,11 +679,10 @@ async function exportarAuditLogPDF() {
         const W = 210, H = 297;
         const pdf = new jsPDF("p", "mm", "a4");
 
+        // capa navy
         pdf.setFillColor(26, 31, 54);
         pdf.rect(0, 0, W, H, "F");
-
         PDF_UTILS.inserirLogo(pdf, W / 2 - 35, 12, 70, 18);
-
         pdf.setFillColor(255, 255, 255);
         pdf.roundedRect(20, 40, W - 40, 62, 6, 6, "F");
         pdf.setTextColor(26, 31, 54);
@@ -479,7 +715,6 @@ async function exportarAuditLogPDF() {
             pdf.text(valorLines, 107, yFilt);
             yFilt += 7 * valorLines.length;
         });
-
         pdf.setTextColor(200, 210, 230);
         pdf.setFontSize(9);
         pdf.text(`Gerado em: ${new Date().toLocaleString("pt-PT")}`, W / 2, H - 28, { align: "center" });
@@ -487,6 +722,7 @@ async function exportarAuditLogPDF() {
         pdf.setFontSize(8);
         pdf.text("Metric4 RTLS — Documento de Auditoria Confidencial", W / 2, H - 10, { align: "center" });
 
+        // paginas de conteudo
         const cabecalhos = ["Timestamp", "Tenant", "Utilizador", "Ação", "Detalhes"];
         const larguras   = [38, 28, 28, 38, 58];
         const xTbl = 10;
@@ -554,7 +790,7 @@ async function exportarAuditLogPDF() {
 
                 let yM = y + 3.6;
                 pdf.setFontSize(7);
-                tenLines.forEach((l) => { pdf.text(l, xL, yM); yM += passoLinha; });
+                tenLines.forEach(l => { pdf.text(l, xL, yM); yM += passoLinha; });
                 xL += larguras[1];
 
                 pdf.setFontSize(7.5);
@@ -563,12 +799,12 @@ async function exportarAuditLogPDF() {
 
                 yM = y + 3.6;
                 pdf.setFontSize(7);
-                acaoLines.forEach((l) => { pdf.text(l, xL, yM); yM += passoLinha; });
+                acaoLines.forEach(l => { pdf.text(l, xL, yM); yM += passoLinha; });
                 xL += larguras[3];
 
                 yM = y + 3.6;
                 pdf.setTextColor(55, 65, 90);
-                detLines.forEach((l) => { pdf.text(l, xL, yM); yM += passoLinha; });
+                detLines.forEach(l => { pdf.text(l, xL, yM); yM += passoLinha; });
 
                 y += rowH;
             });

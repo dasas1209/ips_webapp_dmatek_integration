@@ -10,6 +10,7 @@
     <link rel="stylesheet" href="/static/style.css?v=3.1">
     <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
     <style>
+        /* ── layout ─────────────────────────────────────────────────── */
         .audit-log-page {
             max-width: 1280px;
             margin: 0 auto;
@@ -18,12 +19,14 @@
         .audit-log-header {
             display: flex;
             justify-content: space-between;
-            align-items: center;
+            align-items: flex-start;
             flex-wrap: wrap;
             gap: 12px;
             margin-bottom: 20px;
         }
-        .audit-log-header h1 { font-size: 22px; font-weight: 700; }
+        .audit-log-header h1 { font-size: 22px; font-weight: 700; margin-top: 6px; }
+
+        /* ── filtros ─────────────────────────────────────────────────── */
         .filters-card {
             background: var(--surface-1);
             border: 1px solid var(--surface-2);
@@ -32,19 +35,15 @@
             box-shadow: var(--shadow-soft);
             margin-bottom: 20px;
         }
-        .filters-intro {
-            font-size: 13px;
-            margin-bottom: 14px;
-        }
+        .filters-intro { font-size: 13px; margin-bottom: 14px; }
         .filters-grid {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
             gap: 14px 16px;
         }
         .filter-field-wide { grid-column: span 2; }
-        @media (max-width: 640px) {
-            .filter-field-wide { grid-column: span 1; }
-        }
+        @media (max-width: 640px) { .filter-field-wide { grid-column: span 1; } }
+
         .filter-field label {
             display: block;
             font-size: 13px;
@@ -85,9 +84,8 @@
             padding-top: 14px;
             border-top: 1px dashed var(--surface-2);
         }
-        @media (max-width: 520px) {
-            .filters-dates-row { grid-template-columns: 1fr; }
-        }
+        @media (max-width: 520px) { .filters-dates-row { grid-template-columns: 1fr; } }
+
         .filters-actions {
             display: flex;
             gap: 8px;
@@ -96,6 +94,183 @@
             align-items: center;
         }
         .filters-actions .muted { font-size: 12px; margin-left: auto; }
+
+        /* ── multi-select ────────────────────────────────────────────── */
+        .ms-wrap { position: relative; }
+
+        .ms-trigger {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            border: 1px solid var(--surface-2);
+            border-radius: var(--radius-sm);
+            padding: 8px 10px;
+            font: inherit;
+            font-size: 14px;
+            background: #fff;
+            color: var(--text-main);
+            cursor: pointer;
+            text-align: left;
+            transition: border-color var(--transition-fast);
+            min-height: 38px;
+        }
+        .ms-trigger:hover { border-color: #94a3b8; }
+        .ms-trigger:focus-visible {
+            outline: 2px solid var(--tenant-primary);
+            outline-offset: 1px;
+        }
+        .ms-trigger-text {
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            color: var(--text-muted);
+        }
+        .ms-trigger-text.tem-selecao { color: var(--text-main); }
+        .ms-badge {
+            min-width: 20px;
+            height: 20px;
+            border-radius: 10px;
+            background: var(--tenant-primary);
+            color: #fff;
+            font-size: 11px;
+            font-weight: 700;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0 5px;
+            flex-shrink: 0;
+        }
+        .ms-chevron {
+            font-size: 10px;
+            color: var(--text-muted);
+            flex-shrink: 0;
+            transition: transform var(--transition-fast);
+        }
+        .ms-trigger[aria-expanded="true"] .ms-chevron { transform: rotate(180deg); }
+
+        .ms-dropdown {
+            position: absolute;
+            top: calc(100% + 4px);
+            left: 0;
+            right: 0;
+            background: var(--surface-1);
+            border: 1px solid var(--surface-2);
+            border-radius: var(--radius-sm);
+            box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
+            z-index: 300;
+            max-height: 320px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .ms-dropdown.escondido { display: none; }
+
+        .ms-search-wrap {
+            padding: 8px 8px 0;
+            flex-shrink: 0;
+        }
+        .ms-search {
+            width: 100%;
+            border: 1px solid var(--surface-2);
+            border-radius: var(--radius-sm);
+            padding: 6px 10px 6px 28px;
+            font: inherit;
+            font-size: 13px;
+            background: var(--surface-0)
+                url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' fill='%2364748b' viewBox='0 0 16 16'%3E%3Cpath d='M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85zm-5.242 1.156a5 5 0 1 1 0-10 5 5 0 0 1 0 10z'/%3E%3C/svg%3E")
+                no-repeat 8px center;
+        }
+        .ms-search:focus { outline: none; border-color: var(--tenant-primary); }
+
+        .ms-controls {
+            display: flex;
+            align-items: center;
+            gap: 0;
+            padding: 6px 10px;
+            border-bottom: 1px solid var(--surface-2);
+            flex-shrink: 0;
+        }
+        .ms-ctrl-btn {
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--tenant-primary);
+            background: none;
+            border: none;
+            cursor: pointer;
+            padding: 2px 0;
+        }
+        .ms-ctrl-btn:hover { text-decoration: underline; }
+        .ms-ctrl-sep {
+            width: 1px;
+            height: 12px;
+            background: var(--surface-2);
+            margin: 0 8px;
+        }
+        .ms-ctrl-count {
+            margin-left: auto;
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+
+        .ms-list {
+            overflow-y: auto;
+            flex: 1;
+            padding: 4px 0;
+        }
+        .ms-group-label {
+            font-size: 10px;
+            font-weight: 700;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            padding: 8px 10px 3px;
+        }
+        .ms-option {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 7px 10px;
+            cursor: pointer;
+            font-size: 13px;
+            transition: background var(--transition-fast);
+            user-select: none;
+        }
+        .ms-option:hover { background: var(--surface-0); }
+        .ms-option input[type="checkbox"] {
+            width: 15px;
+            height: 15px;
+            cursor: pointer;
+            accent-color: var(--tenant-primary);
+            flex-shrink: 0;
+        }
+        .ms-empty {
+            padding: 20px;
+            text-align: center;
+            color: var(--text-muted);
+            font-size: 13px;
+        }
+
+        /* ── tabela com ordenacao ────────────────────────────────────── */
+        .sortable {
+            cursor: pointer;
+            user-select: none;
+            white-space: nowrap;
+            transition: color var(--transition-fast);
+        }
+        .sortable:hover { color: var(--tenant-primary); }
+        .sort-icon {
+            display: inline-block;
+            margin-left: 4px;
+            font-size: 10px;
+            opacity: 0.35;
+            vertical-align: middle;
+        }
+        th.sort-active { color: var(--tenant-primary); }
+        th.sort-active .sort-icon { opacity: 1; }
+
+        /* ── paginacao e misc ────────────────────────────────────────── */
         .pagination-bar {
             display: flex;
             justify-content: space-between;
@@ -126,76 +301,45 @@
                 <h1>Log de Ações de Utilizadores</h1>
                 <p class="muted">Histórico global de eventos na plataforma. Sem filtros de data, mostra todo o histórico disponível.</p>
             </div>
-            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px;">
                 <button type="button" class="btn btn-secondary" id="btnVoltarAdmin">← Painel de Gestão</button>
                 <button type="button" class="btn btn-danger" id="btnLogout">Terminar sessão</button>
             </div>
         </header>
 
         <section class="filters-card" aria-label="Filtros">
-            <p class="filters-intro muted">Use os campos abaixo para refinar a lista. Campos vazios não restringem os resultados.</p>
+            <p class="filters-intro muted">Use os campos abaixo para refinar a lista. Pode seleccionar múltiplos clientes e tipos de ação.</p>
 
             <div class="filters-grid">
+                <!-- multi-select tenant -->
                 <div class="filter-field filter-field-wide">
-                    <label for="filtroTenant">Cliente (organização)</label>
-                    <select id="filtroTenant">
-                        <option value="">Todos os clientes</option>
-                    </select>
-                    <span class="filter-hint">Filtrar eventos de um tenant específico</span>
+                    <label>Cliente (organização)</label>
+                    <div id="filtroTenant"></div>
+                    <span class="filter-hint">Seleccione um ou mais clientes — vazio = todos</span>
                 </div>
 
+                <!-- text: utilizador -->
                 <div class="filter-field">
                     <label for="filtroUsername">Utilizador</label>
                     <input type="search" id="filtroUsername" placeholder="Ex.: admin, Dinis…" autocomplete="off" enterkeyhint="search">
-                    <span class="filter-hint">Nome contém o texto (parcial, sem maiúsculas)</span>
+                    <span class="filter-hint">Nome contém o texto (parcial, sem distinção de maiúsculas)</span>
                 </div>
 
+                <!-- multi-select acao -->
                 <div class="filter-field">
-                    <label for="filtroAcao">Tipo de ação</label>
-                    <select id="filtroAcao">
-                        <option value="">Todas as ações</option>
-                        <optgroup label="Sessão">
-                            <option value="login">Início de sessão</option>
-                            <option value="logout">Fim de sessão</option>
-                            <option value="credentials_updated">Credenciais alteradas</option>
-                        </optgroup>
-                        <optgroup label="Clientes (tenants)">
-                            <option value="tenant_created">Cliente criado</option>
-                            <option value="tenant_updated">Cliente atualizado</option>
-                            <option value="tenant_deleted">Cliente eliminado</option>
-                        </optgroup>
-                        <optgroup label="Perfil e Branding">
-                            <option value="tenant_profile_updated">Perfil da empresa atualizado</option>
-                            <option value="tenant_avatar_uploaded">Avatar da empresa atualizado</option>
-                            <option value="tenant_avatar_removed">Avatar da empresa removido</option>
-                        </optgroup>
-                        <optgroup label="Utilizadores">
-                            <option value="user_created">Utilizador criado</option>
-                            <option value="user_updated">Utilizador atualizado</option>
-                            <option value="user_deleted">Utilizador eliminado</option>
-                        </optgroup>
-                        <optgroup label="Mapas">
-                            <option value="map_created">Mapa criado</option>
-                            <option value="map_updated">Mapa atualizado</option>
-                            <option value="map_deleted">Mapa eliminado</option>
-                        </optgroup>
-                        <optgroup label="Tags">
-                            <option value="tag_created">Tag criada</option>
-                            <option value="tag_deleted">Tag eliminada</option>
-                            <option value="tag_aliases_updated">Nomes de tags atualizados</option>
-                        </optgroup>
-                        <optgroup label="Dados e Relatórios">
-                            <option value="audit_report_viewed">Relatório de auditoria consultado</option>
-                        </optgroup>
-                    </select>
+                    <label>Tipo de ação</label>
+                    <div id="filtroAcao"></div>
+                    <span class="filter-hint">Seleccione uma ou mais acções — vazio = todas</span>
                 </div>
 
+                <!-- text: detalhes -->
                 <div class="filter-field filter-field-wide">
                     <label for="filtroDetalhes">Texto nos detalhes</label>
                     <input type="search" id="filtroDetalhes" placeholder="Ex.: Mapa, password, role=admin…" autocomplete="off" enterkeyhint="search">
                     <span class="filter-hint">Procura dentro da descrição completa do evento</span>
                 </div>
 
+                <!-- periodo -->
                 <div class="filter-field">
                     <label for="filtroPeriodo">Período</label>
                     <select id="filtroPeriodo">
@@ -238,10 +382,10 @@
                 <table class="tabela-auditoria" id="tabelaAuditLog">
                     <thead>
                         <tr>
-                            <th>Timestamp</th>
-                            <th>Tenant</th>
-                            <th>Utilizador</th>
-                            <th>Ação</th>
+                            <th class="sortable" data-col="timestamp">Timestamp <span class="sort-icon">▼</span></th>
+                            <th class="sortable" data-col="tenant_id">Tenant <span class="sort-icon">⇅</span></th>
+                            <th class="sortable" data-col="username">Utilizador <span class="sort-icon">⇅</span></th>
+                            <th class="sortable" data-col="acao">Ação <span class="sort-icon">⇅</span></th>
                             <th>Detalhes</th>
                         </tr>
                     </thead>
@@ -251,7 +395,7 @@
                 </table>
             </div>
             <div class="pagination-bar">
-                <div>
+                <div style="display:flex;gap:6px;">
                     <button type="button" class="btn btn-secondary" id="btnAnterior" disabled>Anterior</button>
                     <button type="button" class="btn btn-secondary" id="btnProximo" disabled>Próximo</button>
                 </div>
@@ -262,6 +406,6 @@
 
     <script src="/static/auth.js"></script>
     <script src="/static/pdf-utils.js"></script>
-    <script src="/static/audit_log.js?v=2.0"></script>
+    <script src="/static/audit_log.js?v=3.0"></script>
 </body>
 </html>

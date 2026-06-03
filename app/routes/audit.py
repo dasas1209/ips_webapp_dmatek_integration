@@ -23,6 +23,8 @@ logger = logging.getLogger("metric4.api")
 
 router = APIRouter()
 
+_CAMPOS_ORDENACAO = {"timestamp", "tenant_id", "username", "acao"}
+
 
 def _parse_query_ts(val: str) -> datetime:
     normalizado = val.strip().replace("Z", "+00:00")
@@ -54,13 +56,22 @@ def _match_parcial_ci(valor: str | None, filtro: str | None) -> bool:
     return filtro.lower() in (valor or "").lower()
 
 
-def _carregar_system_access_log(start: str, stop: str, tenant_id: str | None = None) -> list[dict]:
+def _carregar_system_access_log(
+    start: str,
+    stop: str,
+    tenant_ids: list[str] | None = None,
+) -> list[dict]:
     if not INFLUX_BUCKET or not INFLUX_ORG:
         return []
 
+    # constroi filtro de tenant em flux para push-down eficiente
     tenant_filter = ""
-    if tenant_id and validar_tenant_id(tenant_id):
-        tenant_filter = f'|> filter(fn: (r) => r["tenant_id"] == "{tenant_id}")'
+    if tenant_ids:
+        if len(tenant_ids) == 1:
+            tenant_filter = f'|> filter(fn: (r) => r["tenant_id"] == "{tenant_ids[0]}")'
+        else:
+            condicoes = " or ".join(f'r["tenant_id"] == "{t}"' for t in tenant_ids)
+            tenant_filter = f"|> filter(fn: (r) => {condicoes})"
 
     query = f"""
         from(bucket: "{INFLUX_BUCKET}")
@@ -90,35 +101,50 @@ def _carregar_system_access_log(start: str, stop: str, tenant_id: str | None = N
 
 @router.get("/admin/audit-log", tags=["Admin"])
 def admin_audit_log(
-    tenant_id: str | None = Query(None),
+    tenant_id: list[str] | None = Query(default=None),
     username: str | None = Query(None),
-    acao: str | None = Query(None),
+    acao: list[str] | None = Query(default=None),
     detalhes: str | None = Query(None),
     ts_inicio: str | None = Query(None),
     ts_fim: str | None = Query(None),
+    sort_by: str = Query(default="timestamp"),
+    sort_dir: str = Query(default="desc"),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=2000),
     _: dict = Depends(require_superadmin),
 ):
     page_size = min(max(page_size, 1), 2000)
+
+    # normaliza e valida parametros de ordenacao
+    if sort_by not in _CAMPOS_ORDENACAO:
+        sort_by = "timestamp"
+    sort_dir = "asc" if sort_dir == "asc" else "desc"
+
     try:
-        if tenant_id and not validar_tenant_id(tenant_id):
-            return {"total": 0, "page": page, "page_size": page_size, "resultados": []}
+        # valida tenant_ids recebidos
+        tenant_ids_validos: list[str] | None = None
+        if tenant_id:
+            tenant_ids_validos = [t for t in tenant_id if validar_tenant_id(t)]
+            if not tenant_ids_validos:
+                return {"total": 0, "page": page, "page_size": page_size, "resultados": []}
 
         try:
             start, stop = _resolver_intervalo_audit(ts_inicio, ts_fim)
         except (ValueError, TypeError):
             return {"total": 0, "page": page, "page_size": page_size, "resultados": []}
 
-        eventos = _carregar_system_access_log(start, stop, tenant_id)
+        eventos = _carregar_system_access_log(start, stop, tenant_ids_validos)
 
         filtrados = [
             e for e in eventos
             if _match_parcial_ci(e.get("username"), username)
-            and _match_parcial_ci(e.get("acao"), acao)
+            and (not acao or e.get("acao") in acao)
             and _match_parcial_ci(e.get("detalhes"), detalhes)
-            and (not tenant_id or e.get("tenant_id") == tenant_id)
         ]
+
+        # ordenacao em python — permite qualquer coluna sem nova query influx
+        reverse = sort_dir == "desc"
+        filtrados.sort(key=lambda e: (e.get(sort_by) or ""), reverse=reverse)
 
         total = len(filtrados)
         offset = (page - 1) * page_size
