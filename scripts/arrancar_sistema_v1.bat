@@ -1,6 +1,8 @@
 @echo off
 color 0A
-cd /d "%~dp0"
+cd /d "%~dp0.."
+:: garante que a raiz do projecto esta no PYTHONPATH para imports de app.* e config
+set PYTHONPATH=%CD%;%PYTHONPATH%
 echo ===================================================
 echo       Metric4 RTLS  -  Sistema de Arranque
 echo ===================================================
@@ -16,7 +18,7 @@ if errorlevel 1 (
 )
 
 echo [2] A verificar/inicializar base de dados SQLite...
-python database_setup.py
+python scripts\database_setup.py
 if errorlevel 1 (
     echo.
     echo ERRO: Falha na inicializacao da base de dados.
@@ -28,7 +30,7 @@ if errorlevel 1 (
 
 echo [3] A ligar o Motor de Escuta (WebSocket -^> InfluxDB)...
 :: Abre um terminal isolado para o motor que recebe posicoes do servidor Dmatek
-start "Escuta Metric4" cmd /k "python escuta_dmatek.py"
+start "Escuta Metric4" cmd /k "python worker\escuta_dmatek.py"
 
 echo [4] A aguardar 2 segundos para ligar o proximo servico...
 timeout /t 2 /nobreak > NUL
@@ -39,17 +41,20 @@ for /f "tokens=5" %%P in ('netstat -ano ^| findstr ":8000" ^| findstr "LISTENING
     taskkill /PID %%P /F >nul 2>&1
 )
 :: Abre um segundo terminal isolado para a API FastAPI
-start "Servidor API Metric4" cmd /k "uvicorn api_dmatek:app --reload --reload-dir . --reload-include api_dmatek.py --reload-include services"
+start "Servidor API Metric4" cmd /k "uvicorn app.main:app --reload --reload-dir . --reload-include app"
 
 echo [6] A aguardar 3 segundos para a API estabilizar...
 timeout /t 3 /nobreak > NUL
 
 echo [7] A abrir a WebApp no browser...
+:: URL de desenvolvimento — alterar para o host real em producao
 :: Ponto de entrada unico — o login faz routing automatico por role:
 ::   SUPERADMIN (cliente_admin)  ->  /admin.html  (gestao completa, todos os clientes)
 ::   ADMIN      (login via cliente) ->  /admin.html  (gestao do proprio cliente)
 ::   USER       (login via user)    ->  /app         (dashboard de supervisor)
-start http://127.0.0.1:8000/app
+set APP_URL=http://127.0.0.1:8000/app
+set DOCS_URL=http://127.0.0.1:8000/docs
+start "" %APP_URL%
 
 echo.
 echo ===================================================
@@ -60,8 +65,8 @@ echo   "Escuta Metric4"       — recebe posicoes UWB do servidor Dmatek
 echo   "Servidor API Metric4" — serve a API REST e o frontend
 echo.
 echo Acesso:
-echo   Browser   ->  http://127.0.0.1:8000/app
-echo   API Docs  ->  http://127.0.0.1:8000/docs
+echo   Browser   ->  %APP_URL%
+echo   API Docs  ->  %DOCS_URL%
 echo.
 echo Roles disponiveis:
 echo   SUPERADMIN — user da tabela users com cliente_id = cliente_admin

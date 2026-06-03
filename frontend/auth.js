@@ -1,14 +1,6 @@
-/**
- * auth.js
- * modulo partilhado de autenticacao metric4 rtls
- * incluir antes de qualquer outro script que precise de autenticacao:
- * <script src="/static/auth.js"></script>
- */
+// auth.js modulo partilhado de autenticacao metric4 rtls
 
-/**
- * verifica se o jwt guardado em localstorage esta expirado
- * @returns {boolean}
- */
+// verifica se o jwt guardado em localstorage esta expirado
 function tokenExpirado() {
     const token = localStorage.getItem("cracha_jwt");
     if (!token) return true;
@@ -22,10 +14,7 @@ function tokenExpirado() {
     }
 }
 
-/**
- * le jwt do localstorage — devolve null se ausente ou expirado
- * @returns {string|null}
- */
+// le jwt do localstorage — devolve null se ausente ou expirado
 function obterToken() {
     if (tokenExpirado()) {
         localStorage.removeItem("cracha_jwt");
@@ -37,11 +26,7 @@ function obterToken() {
     return localStorage.getItem("cracha_jwt");
 }
 
-/**
- * devolve o role do utilizador autenticado: "superadmin" | "admin" | "user" | null
- * lê sempre do token para evitar inconsistências com cache stale
- * @returns {string|null}
- */
+// le o role sempre do token para evitar inconsistencias com cache stale
 function obterRole() {
     const token = obterToken();
     if (!token) return null;
@@ -53,10 +38,7 @@ function obterRole() {
     }
 }
 
-/**
- * devolve tenant id do utilizador autenticado
- * @returns {string|null}
- */
+// devolve tenant id do utilizador autenticado
 function obterTenantId() {
     const cached = localStorage.getItem("tenant_id");
     if (cached) return cached;
@@ -75,17 +57,24 @@ function obterTenantId() {
     }
 }
 
-/**
- * verifica se o utilizador autenticado e o administrador do sistema
- * @returns {boolean}
- */
+// devolve o username do utilizador autenticado a partir do jwt
+function obterNomeUtilizador() {
+    const token = obterToken();
+    if (!token) return "-";
+    try {
+        const payload = JSON.parse(atob(token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
+        return payload.sub || payload.username || payload.user || "-";
+    } catch {
+        return "-";
+    }
+}
+
+// verifica se o utilizador autenticado e o administrador do sistema
 function isPainelAdmin() {
     return localStorage.getItem("is_admin") === "true";
 }
 
-/**
- * redireciona para login se nao houver sessao activa
- */
+// redireciona para login se nao houver sessao activa
 function redirecionarSeNaoAutenticado() {
     if (!obterToken()) {
         window.location.href = "/";

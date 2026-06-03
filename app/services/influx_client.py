@@ -1,5 +1,5 @@
 """
-services/influx_client.py
+app/services/influx_client.py
 singleton do cliente influxdb partilhado entre modulos
 """
 

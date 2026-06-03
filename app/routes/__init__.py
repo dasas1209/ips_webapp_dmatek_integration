@@ -1,0 +1,1 @@
+# routers fastapi por dominio

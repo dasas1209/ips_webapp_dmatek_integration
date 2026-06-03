@@ -1,28 +1,29 @@
 """
-services/database.py
+app/services/database.py
 utilitarios de acesso a base de dados sqlite e validacao de tenant
 """
 
+import logging
 import re
 import sqlite3
 from pathlib import Path
 
-DB_PATH = Path(__file__).parent.parent / "metric4rtls_system.db"
+DB_PATH = Path(__file__).parent.parent.parent / "metric4rtls_system.db"
 
-# allowlist: apenas alfanumerico, underscore e hifen (max 64 chars)
+logger = logging.getLogger("metric4.api")
+
+# allowlist apenas alfanumerico underscore e hifen max 64 chars
 _TENANT_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
 
 
 def get_db_connection() -> sqlite3.Connection:
-    """devolve ligacao sqlite com row_factory e fks activos.
-    Tenta activar WAL (permite acesso concorrente sem lock total), mas não falha se a
-    transição não for possível (ex: outra conexão aberta em modo DELETE)."""
+    """devolve ligacao sqlite com row_factory e fks activos — ativa wal se possivel"""
     conn = sqlite3.connect(DB_PATH, timeout=10)
     conn.row_factory = sqlite3.Row
     try:
         conn.execute("PRAGMA journal_mode=WAL")
     except sqlite3.OperationalError:
-        pass  # DB ainda em DELETE mode; será migrada para WAL na próxima abertura exclusiva
+        pass  # db em delete mode — sera migrado para wal na proxima abertura exclusiva
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
 
@@ -40,9 +41,9 @@ def carregar_matriz_clientes() -> dict[str, str]:
             rows = conn.execute("SELECT id_fisico, cliente_id FROM tags").fetchall()
         for row in rows:
             matriz[row["id_fisico"]] = row["cliente_id"]
-        print(f"[INFO] Matriz carregada da BD: {len(matriz)} tag(s) mapeada(s).")
+        logger.info("matriz carregada da bd: %s tag(s) mapeada(s)", len(matriz))
     except sqlite3.Error as exc:
-        print(f"[ERRO] Falha ao ler matriz de clientes da BD: {exc}")
+        logger.error("falha ao ler matriz de clientes da bd: %s", exc)
     return matriz
 
 
@@ -57,7 +58,7 @@ def obter_limites_mapa(cliente_id: str) -> tuple[float, float]:
         if row:
             return float(row["limite_x"]), float(row["limite_y"])
     except sqlite3.Error as exc:
-        print(f"[AVISO] Nao foi possivel obter limites do mapa para {cliente_id}: {exc}")
+        logger.warning("nao foi possivel obter limites do mapa para %s: %s", cliente_id, exc)
 
     # fallback defensivo: valores do config original
     from config import LIMITE_X_CM, LIMITE_Y_CM  # noqa: PLC0415

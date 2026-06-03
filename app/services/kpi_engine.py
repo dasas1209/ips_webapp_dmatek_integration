@@ -1,13 +1,12 @@
 """
-services/kpi_engine.py
+app/services/kpi_engine.py
 motor de calculo de kpis para posicoes de tags rtls
-logica pura sem i/o — chamada por api_dmatek.py
+logica pura sem i/o — chamada por app/main.py
 """
 
 import math
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional
 
 from config import LIMIAR_MOVIMENTO_CM
 
@@ -18,8 +17,8 @@ class RegistoTag:
     tag_id: str
     x: float
     y: float
-    timestamp: Optional[datetime] = None
-    bateria: Optional[float] = None
+    timestamp: datetime | None = None
+    bateria: float | None = None
 
 
 @dataclass
@@ -52,13 +51,10 @@ def calcular_kpis(
     registos: list[RegistoTag],
     limiar_movimento_cm: float = LIMIAR_MOVIMENTO_CM,
 ) -> dict[str, KpiTag]:
-    """
-    calcula kpis por tag a partir de registos ordenados cronologicamente.
-    funcao pura — sem i/o, sem efeitos laterais.
-    """
+    """calcula kpis por tag a partir de registos ordenados cronologicamente — sem i/o"""
     tags: dict[str, KpiTag] = {}
-    # ultimo ponto conhecido por tag: (x, y, timestamp)
-    ultimas: dict[str, tuple[float, float, Optional[datetime]]] = {}
+    # ultimo ponto conhecido por tag (x, y, timestamp)
+    ultimas: dict[str, tuple[float, float, datetime | None]] = {}
 
     for r in registos:
         if r.tag_id not in tags:

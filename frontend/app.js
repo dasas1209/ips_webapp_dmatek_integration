@@ -50,21 +50,6 @@ const els = {
     notificacoesWrap: document.getElementById("notificacoesWrap"),
 };
 
-function obterNomeUtilizador() {
-    const token = obterToken();
-    if (!token) return "-";
-    try {
-        const payload = JSON.parse(atob(token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
-        return payload.sub || payload.username || payload.user || "-";
-    } catch {
-        return "-";
-    }
-}
-
-function isAdminToken() {
-    return localStorage.getItem("is_admin") === "true";
-}
-
 function setThemeTenant(tenant) {
     const tenantId = String(tenant || "").toLowerCase();
     const temas = cfg.tenantTheme?.byTenantId || {};
@@ -114,7 +99,7 @@ async function fazerLogin(event) {
             window.location.href = "/admin.html";
             return;
         }
-        
+
         await mudarParaDashboard();
     } catch {
         els.msgErro.textContent = "Não foi possível contactar o servidor.";
@@ -135,7 +120,7 @@ async function mudarParaDashboard() {
 
     await carregarBrandingTenant();
     setThemeTenant(tenant);
-    
+
     await carregarMapasDoServidor();
 
     await obterPosicoes();
@@ -180,7 +165,7 @@ async function carregarBrandingTenant() {
         }
         setTenantInfo(dados.tenant_id, dados.nome, dados.logo_url || null);
     } catch {
-        /* mantém cache local */
+        /* mantem cache local */
     }
 }
 
@@ -246,8 +231,6 @@ async function obterPosicoes() {
             return;
         }
 
-
-
         if (pacoteDados.total_tags_sql !== undefined) {
             state.totalAssetsSql = pacoteDados.total_tags_sql;
         }
@@ -290,8 +273,7 @@ function normalizarAssets(dados) {
 }
 
 function filtrarDadosSessaoTempoReal(dados) {
-    // Mostra todos os assets recebidos, independentemente da hora de login.
-    // Os assets offline ficam visiveis na tabela mas marcados como "Sem sinal".
+    // todos os assets sao mostrados independentemente da hora de login — offline ficam visiveis na tabela
     return dados;
 }
 
@@ -302,7 +284,7 @@ async function carregarMapasDoServidor() {
         const resp = await fetch("/api/mapas", { headers: { Authorization: "Bearer " + token } });
         if (!resp.ok) return;
         state.mapasDisponiveis = await resp.json();
-        
+
         const opcoes = state.mapasDisponiveis.map(m => `<option value="${m.id}">${m.nome}</option>`);
         if (opcoes.length === 0) {
             els.filtroMapa.innerHTML = '<option value="">Sem Mapas</option>';
@@ -747,7 +729,7 @@ function carregarImagemDoMapaAtivo() {
         desenharFabrica(state.dadosFiltrados);
         return;
     }
-    
+
     let caminho = state.mapaAtivo.path;
     if (window.ASSET_PATHS) {
         caminho = window.ASSET_PATHS.normalizarCaminhoImagem(caminho);
@@ -758,7 +740,7 @@ function carregarImagemDoMapaAtivo() {
     }
 
     if (state.imagemMapa.src.includes(caminho)) return;
-    
+
     state.imagemMapa.onload = () => desenharFabrica(state.dadosFiltrados);
     state.imagemMapa.onerror = () => console.error("Falha ao carregar a imagem do mapa:", caminho);
     state.imagemMapa.src = caminho;
@@ -777,4 +759,3 @@ window.addEventListener("load", async () => {
         await mudarParaDashboard();
     }
 });
-

@@ -3,3 +3,57 @@ __pycache__/
 auditoria_tags.csv
 matriz_clientes.csv
 metric4rtls_system.db
+
+# python — compilados e caches
+*.pyc
+*.pyo
+*.pyd
+**/__pycache__/
+.pytest_cache/
+.mypy_cache/
+*.egg-info/
+dist/
+build/
+
+# ambientes virtuais
+.venv/
+venv/
+env/
+
+# base de dados sqlite (ficheiros WAL e journal)
+*.db
+*.db-shm
+*.db-wal
+*.db-journal
+
+# ficheiros de ambiente (todos os variantes)
+.env
+.env.*
+*.env
+!.env.example
+
+# sistema operativo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# outputs gerados pelo utilizador
+*.pdf
+exports/
+logs/
+*.log
+
+# ide e ferramentas locais
+.idea/
+.vscode/
+*.swp
+*.swo
+.claude/settings.local.json
+
+# csvs temporarios de importacao
+utilizadores_placeholder.csv
+matriz_mapas.csv
+
+# cobertura de testes
+.coverage
+htmlcov/

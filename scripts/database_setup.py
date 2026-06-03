@@ -1,5 +1,5 @@
 """
-database_setup.py
+scripts/database_setup.py
 inicializacao e seeding da base de dados sqlite3 do sistema metric4 rtls
 """
 
@@ -8,25 +8,20 @@ import logging
 import sqlite3
 from pathlib import Path
 
-from services.database import get_db_connection
-from config import ADMIN_TENANT_ID, ADMIN_USERNAME, ADMIN_PASSWORD
+from app.services.database import get_db_connection
+from config import ADMIN_PASSWORD, ADMIN_TENANT_ID, ADMIN_USERNAME
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger("metric4.db_setup")
 
-# caminho canonico da base de dados (sempre relativo ao script)
-BASE_DIR = Path(__file__).parent
+BASE_DIR = Path(__file__).parent.parent
 DB_PATH  = BASE_DIR / "metric4rtls_system.db"
 
-# csvs de origem — apagados apos seeding bem-sucedido
-CSV_CLIENTES  = BASE_DIR / "matriz_clientes.csv"
-CSV_MAPAS     = BASE_DIR / "matriz_mapas.csv"
-CSV_USUARIOS  = BASE_DIR / "utilizadores_placeholder.csv"
+# csvs de origem apagados apos carregamento bem-sucedido
+CSV_CLIENTES = BASE_DIR / "matriz_clientes.csv"
+CSV_MAPAS    = BASE_DIR / "matriz_mapas.csv"
+CSV_USUARIOS = BASE_DIR / "utilizadores_placeholder.csv"
 
-
-# ---------------------------------------------------------------------------
-# schema
-# ---------------------------------------------------------------------------
 
 def create_tables(conn: sqlite3.Connection) -> None:
     """cria todas as tabelas se nao existirem"""
@@ -71,34 +66,22 @@ def create_tables(conn: sqlite3.Connection) -> None:
         );
     """)
     conn.commit()
-    logger.info("tabelas verificadas/criadas.")
+    logger.info("tabelas verificadas/criadas")
 
-
-# ---------------------------------------------------------------------------
-# verificacao de estado
-# ---------------------------------------------------------------------------
 
 def check_db_initialized(conn: sqlite3.Connection) -> bool:
-    """
-    devolve True se a bd ja contem dados (seeding ja correu).
-    verifica a tabela clientes — se tiver pelo menos 1 registo, assume bd pronta.
-    """
+    """devolve True se a bd ja contem dados (pelo menos 1 cliente)"""
     try:
         row = conn.execute("SELECT COUNT(*) AS n FROM clientes").fetchone()
         return row["n"] > 0
     except sqlite3.OperationalError:
-        # tabela nao existe ainda
         return False
 
-
-# ---------------------------------------------------------------------------
-# seeding a partir dos csvs
-# ---------------------------------------------------------------------------
 
 def _seed_clientes_e_tags(conn: sqlite3.Connection) -> None:
     """popula clientes e tags a partir do csv matriz_clientes.csv"""
     if not CSV_CLIENTES.exists():
-        logger.warning("csv matriz_clientes.csv nao encontrado — sem tags/clientes seeded.")
+        logger.warning("csv matriz_clientes.csv nao encontrado — sem tags carregadas")
         return
 
     clientes_vistos: set[str] = set()
@@ -113,7 +96,6 @@ def _seed_clientes_e_tags(conn: sqlite3.Connection) -> None:
             if not tag_id or not tenant_id:
                 continue
 
-            # cria cliente se ainda nao existe
             if tenant_id not in clientes_vistos:
                 conn.execute(
                     "INSERT OR IGNORE INTO clientes (id, nome) VALUES (?, ?)",
@@ -121,32 +103,30 @@ def _seed_clientes_e_tags(conn: sqlite3.Connection) -> None:
                 )
                 clientes_vistos.add(tenant_id)
 
-            # insere tag
             conn.execute(
                 "INSERT OR IGNORE INTO tags (id_fisico, nome, cliente_id) VALUES (?, ?, ?)",
                 (tag_id, descricao or tag_id, tenant_id),
             )
 
     conn.commit()
-    logger.info("clientes seeded: %s | tags seeded a partir do csv.", len(clientes_vistos))
+    logger.info("clientes carregados: %s | tags carregadas a partir do csv", len(clientes_vistos))
 
 
 def _seed_mapas(conn: sqlite3.Connection) -> None:
-    """popula mapas a partir de um CSV externo para evitar sementes fixas."""
-
+    """popula mapas a partir do csv matriz_mapas.csv"""
     if not CSV_MAPAS.exists():
-        logger.warning("csv matriz_mapas.csv nao encontrado — sem mapas seeded.")
+        logger.warning("csv matriz_mapas.csv nao encontrado — sem mapas carregados")
         return
 
     count = 0
     with open(CSV_MAPAS, encoding="utf-8") as fh:
         reader = csv.DictReader(fh, delimiter=";")
         for linha in reader:
-            nome = linha.get("nome", "").strip()
-            limite_x = linha.get("limite_x", "").strip()
-            limite_y = linha.get("limite_y", "").strip()
-            ficheiro = linha.get("ficheiro_img", "").strip() or None
-            cliente_id = linha.get("cliente_id", "").strip()
+            nome       = linha.get("nome",        "").strip()
+            limite_x   = linha.get("limite_x",    "").strip()
+            limite_y   = linha.get("limite_y",    "").strip()
+            ficheiro   = linha.get("ficheiro_img","").strip() or None
+            cliente_id = linha.get("cliente_id",  "").strip()
 
             if not nome or not limite_x or not limite_y or not cliente_id:
                 continue
@@ -172,13 +152,13 @@ def _seed_mapas(conn: sqlite3.Connection) -> None:
             count += 1
 
     conn.commit()
-    logger.info("mapas seeded: %s", count)
+    logger.info("mapas carregados: %s", count)
 
 
 def _seed_usuarios(conn: sqlite3.Connection) -> None:
     """popula utilizadores a partir do csv utilizadores_placeholder.csv"""
     if not CSV_USUARIOS.exists():
-        logger.warning("csv utilizadores_placeholder.csv nao encontrado — sem utilizadores seeded.")
+        logger.warning("csv utilizadores_placeholder.csv nao encontrado — sem utilizadores carregados")
         return
 
     count = 0
@@ -192,7 +172,7 @@ def _seed_usuarios(conn: sqlite3.Connection) -> None:
             if not username or not password or not tenant_id:
                 continue
 
-            # garante que o cliente existe antes de inserir FK
+            # garante fk valida antes de inserir o utilizador
             conn.execute(
                 "INSERT OR IGNORE INTO clientes (id, nome) VALUES (?, ?)",
                 (tenant_id, tenant_id.replace("_", " ").title()),
@@ -204,23 +184,19 @@ def _seed_usuarios(conn: sqlite3.Connection) -> None:
             count += 1
 
     conn.commit()
-    logger.info("utilizadores seeded: %s", count)
+    logger.info("utilizadores carregados: %s", count)
 
 
 def seed_from_csvs(conn: sqlite3.Connection) -> None:
-    """orquestra o seeding completo a partir dos csvs existentes"""
-    logger.info("a fazer seeding da base de dados a partir dos CSVs...")
+    """orquestra o carregamento completo a partir dos csvs existentes"""
+    logger.info("a carregar base de dados a partir dos csvs")
     _seed_clientes_e_tags(conn)
     _seed_mapas(conn)
     _seed_usuarios(conn)
 
 
-# ---------------------------------------------------------------------------
-# migração de caminhos de imagens (assets reorganizados)
-# ---------------------------------------------------------------------------
-
 def _normalizar_path_mapa(path: str) -> str:
-    """converte caminhos legados para /static/assets/imgs/maps/<ficheiro>."""
+    """converte caminhos legados para /static/assets/imgs/maps/<ficheiro>"""
     if not path:
         return path
     p = path.strip().replace("\\", "/")
@@ -235,8 +211,9 @@ def _normalizar_path_mapa(path: str) -> str:
 
 
 def migrate_asset_paths(conn: sqlite3.Connection) -> None:
-    """actualiza ficheiro_img e logo_url para a nova estrutura de pastas."""
+    """actualiza ficheiro_img e logo_url para a nova estrutura de pastas"""
     alterados = 0
+
     for row in conn.execute(
         "SELECT id, ficheiro_img FROM mapas WHERE ficheiro_img IS NOT NULL AND ficheiro_img != ''"
     ).fetchall():
@@ -264,25 +241,18 @@ def migrate_asset_paths(conn: sqlite3.Connection) -> None:
             novo = f"/static/assets/imgs/avatars/{nome}"
         else:
             novo = f"/static/assets/imgs/avatars/{url}"
+
         if novo != row["logo_url"]:
             conn.execute("UPDATE clientes SET logo_url = ? WHERE id = ?", (novo, row["id"]))
             alterados += 1
 
     if alterados:
         conn.commit()
-        logger.info("caminhos de imagens migrados: %s registo(s).", alterados)
+        logger.info("caminhos de imagens migrados: %s registo(s)", alterados)
 
-
-# ---------------------------------------------------------------------------
-# admin idempotente
-# ---------------------------------------------------------------------------
 
 def ensure_admin(conn: sqlite3.Connection) -> None:
-    """
-    garante que existe um cliente admin e um user administrador configurado por ambiente.
-    idempotente — faz apenas leitura se ambos os registos já existirem, evitando
-    lock de escrita quando a API está simultaneamente em execução.
-    """
+    """garante que existe um cliente admin e utilizador administrador configurado por ambiente"""
     cliente_existe = conn.execute(
         "SELECT 1 FROM clientes WHERE id = ?", (ADMIN_TENANT_ID,)
     ).fetchone()
@@ -291,10 +261,10 @@ def ensure_admin(conn: sqlite3.Connection) -> None:
     ).fetchone()
 
     if cliente_existe and user_existe:
-        logger.info("admin verificado — sem alteracoes necessarias.")
+        logger.info("admin verificado — sem alteracoes necessarias")
         return
 
-    # só chega aqui na primeira execucao ou se os registos foram apagados
+    # so chega aqui na primeira execucao ou se os registos foram apagados
     if not cliente_existe:
         conn.execute(
             "INSERT INTO clientes (id, nome) VALUES (?, ?)",
@@ -306,27 +276,19 @@ def ensure_admin(conn: sqlite3.Connection) -> None:
             (ADMIN_USERNAME, ADMIN_PASSWORD, ADMIN_TENANT_ID),
         )
     conn.commit()
-    logger.info("admin criado com sucesso.")
+    logger.info("admin criado com sucesso")
 
-
-# ---------------------------------------------------------------------------
-# limpeza de csvs apos seeding bem-sucedido
-# ---------------------------------------------------------------------------
 
 def delete_csvs() -> None:
-    """apaga os csvs de origem apos seeding — os dados vivem na bd a partir de agora"""
+    """apaga os csvs de origem apos carregamento — os dados vivem na bd a partir de agora"""
     for csv_path in (CSV_CLIENTES, CSV_MAPAS, CSV_USUARIOS):
         if csv_path.exists():
             csv_path.unlink()
             logger.info("csv apagado: %s", csv_path.name)
 
 
-# ---------------------------------------------------------------------------
-# ponto de entrada
-# ---------------------------------------------------------------------------
-
 def main() -> None:
-    logger.info("=== Metric4 DB Setup ===")
+    logger.info("=== metric4 db setup ===")
     logger.info("base de dados: %s", DB_PATH)
 
     try:
@@ -340,28 +302,27 @@ def main() -> None:
             create_tables(conn)
 
             if check_db_initialized(conn):
-                logger.info("Database OK — seeding ignorado.")
+                logger.info("base de dados ja inicializada — carregamento ignorado")
             else:
                 seed_from_csvs(conn)
                 delete_csvs()
-                logger.info("Database seeded com sucesso.")
+                logger.info("base de dados carregada com sucesso")
 
-            # admin e sempre verificado (independente do seeding)
+            # admin verificado independentemente do carregamento inicial
             ensure_admin(conn)
             migrate_asset_paths(conn)
 
     except sqlite3.OperationalError as exc:
         if "database is locked" in str(exc).lower():
-            # API já em execução com a BD aberta — se o setup chegou até aqui,
-            # a BD já foi inicializada em sessões anteriores. Termina com sucesso.
-            logger.info("BD em uso por outro processo — assumindo ja inicializada. Setup ignorado.")
+            # bd ja inicializada em sessoes anteriores — termina sem erro
+            logger.info("bd em uso por outro processo — assumindo ja inicializada")
         else:
-            logger.error("Erro inesperado na BD: %s", exc)
+            logger.error("erro inesperado na bd: %s", exc)
             raise SystemExit(1) from exc
     finally:
         conn.close()
 
-    logger.info("=== Setup concluido ===")
+    logger.info("=== arranque concluido ===")
 
 
 if __name__ == "__main__":
