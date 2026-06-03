@@ -7,8 +7,9 @@ import logging
 import re
 import sqlite3
 import uuid
+from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
 
 from config import ADMIN_TENANT_ID, ADMIN_USERNAME
 from app.dependencies import (
@@ -34,6 +35,39 @@ import app.state as state
 logger = logging.getLogger("metric4.api")
 
 router = APIRouter()
+
+MAPS_FS_DIR = Path(__file__).parent.parent.parent / "frontend" / "assets" / "imgs" / "maps"
+MAPS_URL_PREFIX = "/static/assets/imgs/maps/"
+ALLOWED_MAP_IMAGE_EXT = {".png", ".jpg", ".jpeg", ".webp"}
+MAX_MAP_IMAGE_BYTES = 5 * 1024 * 1024
+
+
+def _extensao_imagem_por_conteudo(conteudo: bytes, filename: str = "") -> str:
+    if conteudo.startswith(b"\x89PNG\r\n\x1a\n") or conteudo.startswith(b"\x89PNG"):
+        return ".png"
+    if conteudo.startswith(b"\xff\xd8"):
+        return ".jpg"
+    if len(conteudo) >= 12 and conteudo[:4] == b"RIFF" and conteudo[8:12] == b"WEBP":
+        return ".webp"
+    nome = (filename or "").lower()
+    if nome.endswith(".png"):
+        return ".png"
+    if nome.endswith(".webp"):
+        return ".webp"
+    if nome.endswith((".jpg", ".jpeg")):
+        return ".jpg"
+    raise HTTPException(status_code=400, detail="Formato nao suportado. Envie PNG, JPEG ou WebP.")
+
+
+def _remover_ficheiros_mapa(map_id: int) -> None:
+    MAPS_FS_DIR.mkdir(parents=True, exist_ok=True)
+    for ficheiro in MAPS_FS_DIR.glob(f"{map_id}.*"):
+        if ficheiro.is_file():
+            ficheiro.unlink(missing_ok=True)
+
+
+def _img_url_canonica_mapa(map_id: int, ext: str) -> str:
+    return f"{MAPS_URL_PREFIX}{map_id}{ext}"
 
 
 @router.get("/api/admin/tenants", tags=["Admin"])
@@ -65,7 +99,7 @@ def admin_get_config(tenant_id: str, payload: dict = Depends(obter_payload_token
     _verificar_acesso_tenant(tenant_id, payload)
     try:
         with get_db_connection() as conn:
-            users = conn.execute("SELECT username FROM users WHERE cliente_id = ?", (tenant_id,)).fetchall()
+            users = conn.execute("SELECT username, password FROM users WHERE cliente_id = ?", (tenant_id,)).fetchall()
             mapas = conn.execute(
                 "SELECT id, nome, limite_x, limite_y, ficheiro_img FROM mapas WHERE cliente_id = ?",
                 (tenant_id,)
@@ -73,7 +107,7 @@ def admin_get_config(tenant_id: str, payload: dict = Depends(obter_payload_token
             tags = conn.execute("SELECT id_fisico, nome FROM tags WHERE cliente_id = ?", (tenant_id,)).fetchall()
             return {
                 "tenant_id": tenant_id,
-                "users": [u["username"] for u in users],
+                "users": [{"username": u["username"], "password": u["password"] or ""} for u in users],
                 "mapas": [{"id": m["id"], "nome": m["nome"], "limite_x": m["limite_x"],
                            "limite_y": m["limite_y"], "path": m["ficheiro_img"]} for m in mapas],
                 "tags": [{"tag_id": t["id_fisico"], "friendly_name": t["nome"]} for t in tags],
@@ -88,16 +122,17 @@ def admin_create_mapa(data: MapaCreate, background_tasks: BackgroundTasks, paylo
     admin_tenant = payload["tenant_id"]
     try:
         with get_db_connection() as conn:
-            conn.execute(
-                "INSERT INTO mapas (nome, limite_x, limite_y, ficheiro_img, cliente_id) VALUES (?, ?, ?, ?, ?)",
-                (data.nome, data.limite_x, data.limite_y, data.ficheiro_img, data.tenant_id)
+            cursor = conn.execute(
+                "INSERT INTO mapas (nome, limite_x, limite_y, cliente_id) VALUES (?, ?, ?, ?)",
+                (data.nome, data.limite_x, data.limite_y, data.tenant_id)
             )
             conn.commit()
+            new_id = cursor.lastrowid
         background_tasks.add_task(
             log_audit_event, admin_tenant, data.tenant_id, "map_created",
-            f"Mapa '{data.nome}' criado (Dimensoes: {data.limite_x}x{data.limite_y} cm, Imagem: {data.ficheiro_img or 'Nenhuma'})",
+            f"Mapa '{data.nome}' criado (Dimensoes: {data.limite_x}x{data.limite_y} cm).",
         )
-        return {"sucesso": True}
+        return {"sucesso": True, "id": new_id}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"erro ao criar mapa: {exc}")
 
@@ -107,17 +142,17 @@ def admin_update_mapa(map_id: int, data: MapaUpdate, background_tasks: Backgroun
     admin_tenant = payload["tenant_id"]
     try:
         with get_db_connection() as conn:
-            row = conn.execute("SELECT cliente_id, nome, limite_x, limite_y, ficheiro_img FROM mapas WHERE id = ?", (map_id,)).fetchone()
+            row = conn.execute("SELECT cliente_id, nome, limite_x, limite_y FROM mapas WHERE id = ?", (map_id,)).fetchone()
             if not row:
                 raise HTTPException(status_code=404, detail="Mapa nao encontrado.")
             _verificar_acesso_tenant(row["cliente_id"], payload)
             conn.execute(
-                "UPDATE mapas SET nome = ?, limite_x = ?, limite_y = ?, ficheiro_img = ? WHERE id = ?",
-                (data.nome, data.limite_x, data.limite_y, data.ficheiro_img, map_id)
+                "UPDATE mapas SET nome = ?, limite_x = ?, limite_y = ? WHERE id = ?",
+                (data.nome, data.limite_x, data.limite_y, map_id)
             )
             conn.commit()
-        old_state = f"[{row['nome']} | {row['limite_x']}x{row['limite_y']} | {row['ficheiro_img'] or 'Sem IMG'}]"
-        new_state = f"[{data.nome} | {data.limite_x}x{data.limite_y} | {data.ficheiro_img or 'Sem IMG'}]"
+        old_state = f"[{row['nome']} | {row['limite_x']}x{row['limite_y']}]"
+        new_state = f"[{data.nome} | {data.limite_x}x{data.limite_y}]"
         background_tasks.add_task(
             log_audit_event, admin_tenant, row["cliente_id"], "map_updated",
             f"Mapa ID:{map_id} atualizado. ANTES: {old_state} -> DEPOIS: {new_state}",
@@ -141,6 +176,7 @@ def admin_delete_mapa(map_id: int, background_tasks: BackgroundTasks, payload: d
             conn.execute("DELETE FROM ancoras WHERE mapa_id = ?", (map_id,))
             conn.execute("DELETE FROM mapas WHERE id = ?", (map_id,))
             conn.commit()
+        _remover_ficheiros_mapa(map_id)
         background_tasks.add_task(
             log_audit_event, admin_tenant, row["cliente_id"], "map_deleted",
             f"Mapa '{row['nome']}' (ID: {map_id}) e todas as suas ancoras apagados.",
@@ -150,6 +186,69 @@ def admin_delete_mapa(map_id: int, background_tasks: BackgroundTasks, payload: d
         raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"erro ao apagar mapa: {exc}")
+
+
+@router.post("/api/admin/mapas/{map_id}/imagem", tags=["Admin"])
+async def admin_upload_mapa_imagem(
+    map_id: int,
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    payload: dict = Depends(obter_payload_token),
+):
+    admin_tenant = payload["tenant_id"]
+    try:
+        with get_db_connection() as conn:
+            row = conn.execute("SELECT cliente_id FROM mapas WHERE id = ?", (map_id,)).fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Mapa nao encontrado.")
+            _verificar_acesso_tenant(row["cliente_id"], payload)
+        conteudo = await file.read()
+        if len(conteudo) > MAX_MAP_IMAGE_BYTES:
+            raise HTTPException(status_code=400, detail="Imagem demasiado grande (maximo 5 MB).")
+        if len(conteudo) < 100:
+            raise HTTPException(status_code=400, detail="Ficheiro de imagem invalido ou vazio.")
+        ext = _extensao_imagem_por_conteudo(conteudo, file.filename or "")
+        if ext not in ALLOWED_MAP_IMAGE_EXT:
+            raise HTTPException(status_code=400, detail="Extensao de ficheiro nao permitida.")
+        MAPS_FS_DIR.mkdir(parents=True, exist_ok=True)
+        _remover_ficheiros_mapa(map_id)
+        (MAPS_FS_DIR / f"{map_id}{ext}").write_bytes(conteudo)
+        img_url = _img_url_canonica_mapa(map_id, ext)
+        with get_db_connection() as conn:
+            conn.execute("UPDATE mapas SET ficheiro_img = ? WHERE id = ?", (img_url, map_id))
+            conn.commit()
+        background_tasks.add_task(
+            log_audit_event, admin_tenant, row["cliente_id"], "map_image_uploaded",
+            f"Imagem do mapa ID:{map_id} actualizada: {img_url}",
+        )
+        return {"sucesso": True, "ficheiro_img": img_url}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"erro ao carregar imagem do mapa: {exc}")
+
+
+@router.delete("/api/admin/mapas/{map_id}/imagem", tags=["Admin"])
+def admin_remover_mapa_imagem(map_id: int, background_tasks: BackgroundTasks, payload: dict = Depends(obter_payload_token)):
+    admin_tenant = payload["tenant_id"]
+    try:
+        with get_db_connection() as conn:
+            row = conn.execute("SELECT cliente_id FROM mapas WHERE id = ?", (map_id,)).fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Mapa nao encontrado.")
+            _verificar_acesso_tenant(row["cliente_id"], payload)
+            _remover_ficheiros_mapa(map_id)
+            conn.execute("UPDATE mapas SET ficheiro_img = NULL WHERE id = ?", (map_id,))
+            conn.commit()
+        background_tasks.add_task(
+            log_audit_event, admin_tenant, row["cliente_id"], "map_image_removed",
+            f"Imagem do mapa ID:{map_id} removida.",
+        )
+        return {"sucesso": True}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"erro ao remover imagem do mapa: {exc}")
 
 
 @router.post("/api/admin/tags/aliases", tags=["Admin"])

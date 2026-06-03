@@ -167,6 +167,14 @@
         #tenantAvatarStatus.is-error { color: #dc2626; }
         #tenantAvatarStatus.is-success { color: #16a34a; }
         #tenantAvatarStatus.is-loading { color: #64748b; }
+
+        #createMapStatus, #editMapStatus {
+            font-size: 0.82rem;
+            min-height: 1.25rem;
+        }
+        #createMapStatus.is-error, #editMapStatus.is-error { color: #dc2626; }
+        #createMapStatus.is-success, #editMapStatus.is-success { color: #16a34a; }
+        #createMapStatus.is-loading, #editMapStatus.is-loading { color: #64748b; }
     </style>
 </head>
 
@@ -427,8 +435,22 @@
                             </div>
                         </div>
                         <div class="mb-3">
-                            <label class="form-label">Caminho da Imagem (Ex: /static/assets/imgs/maps/meu_mapa.png)</label>
-                            <input type="text" class="form-control" id="newMapPath">
+                            <label class="form-label"><i class="fa-solid fa-image me-1"></i> Imagem do Mapa <span class="text-muted fw-normal">(opcional)</span></label>
+                            <div class="avatar-upload-zone">
+                                <input type="file" id="createMapFile" class="avatar-file-input-hidden"
+                                    accept="image/png,image/jpeg,image/jpg,image/webp,.png,.jpg,.jpeg,.webp">
+                                <div class="d-flex flex-wrap gap-2 mb-2">
+                                    <label for="createMapFile" class="btn btn-sm btn-outline-primary mb-0">
+                                        <i class="fa-solid fa-folder-open me-1"></i> Escolher imagem
+                                    </label>
+                                </div>
+                                <p id="createMapSelectedName" class="avatar-selected-name is-empty mb-1">Nenhum ficheiro seleccionado</p>
+                                <p class="form-text mb-1">PNG, JPEG ou WebP — máximo 5 MB.</p>
+                                <p id="createMapStatus" role="status" aria-live="polite"></p>
+                                <div class="text-center mt-1">
+                                    <img id="createMapPreview" src="" alt="Pré-visualização" class="img-fluid rounded border d-none" style="max-height: 150px; object-fit: contain;">
+                                </div>
+                            </div>
                         </div>
                     </div>
                     <div class="modal-footer">
@@ -466,11 +488,28 @@
                             </div>
                         </div>
                         <div class="mb-3">
-                            <label class="form-label">Caminho da Imagem</label>
-                            <input type="text" class="form-control" id="editMapPath">
-                        </div>
-                        <div class="text-center">
-                            <img id="editMapPreview" src="" alt="Pré-visualização" class="img-fluid rounded border d-none" style="max-height: 200px; object-fit: contain;">
+                            <label class="form-label"><i class="fa-solid fa-image me-1"></i> Imagem do Mapa</label>
+                            <div class="avatar-upload-zone">
+                                <input type="file" id="editMapFile" class="avatar-file-input-hidden"
+                                    accept="image/png,image/jpeg,image/jpg,image/webp,.png,.jpg,.jpeg,.webp">
+                                <div class="text-center mb-2">
+                                    <img id="editMapPreview" src="" alt="Pré-visualização" class="img-fluid rounded border d-none" style="max-height: 180px; object-fit: contain;">
+                                </div>
+                                <div class="d-flex flex-wrap gap-2 mb-2">
+                                    <label for="editMapFile" class="btn btn-sm btn-outline-primary mb-0">
+                                        <i class="fa-solid fa-folder-open me-1"></i> Escolher imagem
+                                    </label>
+                                    <button type="button" class="btn btn-sm btn-primary" id="btnUploadMapImage" disabled>
+                                        <i class="fa-solid fa-cloud-arrow-up me-1"></i> Carregar imagem
+                                    </button>
+                                    <button type="button" class="btn btn-sm btn-outline-danger" id="btnRemoverMapImage">
+                                        <i class="fa-solid fa-trash me-1"></i> Remover
+                                    </button>
+                                </div>
+                                <p id="editMapSelectedName" class="avatar-selected-name is-empty mb-1">Nenhum ficheiro seleccionado</p>
+                                <p class="form-text mb-1">PNG, JPEG ou WebP — máximo 5 MB.</p>
+                                <p id="editMapStatus" role="status" aria-live="polite"></p>
+                            </div>
                         </div>
                     </div>
                     <div class="modal-footer">
@@ -745,6 +784,10 @@
         const tenantAvatarSelectedName = document.getElementById('tenantAvatarSelectedName');
         let tenantAvatarPendingFile = null;
         let tenantAvatarPreviewObjectUrl = null;
+        let createMapPendingFile = null;
+        let createMapPreviewObjectUrl = null;
+        let editMapPendingFile = null;
+        let editMapPreviewObjectUrl = null;
 
         function extrairErroApi(dados, status) {
             if (status === 404) {
@@ -858,6 +901,61 @@
                 definirEstadoAvatarStatus('Não foi possível ler o ficheiro como imagem.', 'error');
             };
             probe.src = tenantAvatarPreviewObjectUrl;
+        }
+
+        function validarFicheiroMapaLocal(ficheiro) {
+            const tipos = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/pjpeg'];
+            const extOk = /\.(png|jpe?g|webp)$/i.test(ficheiro.name || '');
+            if (!extOk && ficheiro.type && !tipos.includes(ficheiro.type)) {
+                return 'Formato não suportado. Use PNG, JPEG ou WebP.';
+            }
+            if (ficheiro.size > 5 * 1024 * 1024) {
+                return 'Imagem demasiado grande (máximo 5 MB).';
+            }
+            return null;
+        }
+
+        function definirEstadoMapaStatus(elId, mensagem, tipo) {
+            const el = document.getElementById(elId);
+            if (!el) return;
+            el.textContent = mensagem || '';
+            el.className = tipo ? `is-${tipo}` : '';
+        }
+
+        function libertarPreviewMapaCreateUrl() {
+            if (createMapPreviewObjectUrl) {
+                URL.revokeObjectURL(createMapPreviewObjectUrl);
+                createMapPreviewObjectUrl = null;
+            }
+        }
+
+        function libertarPreviewMapaEditUrl() {
+            if (editMapPreviewObjectUrl) {
+                URL.revokeObjectURL(editMapPreviewObjectUrl);
+                editMapPreviewObjectUrl = null;
+            }
+        }
+
+        function limparSelecaoMapaCriar() {
+            createMapPendingFile = null;
+            libertarPreviewMapaCreateUrl();
+            const fi = document.getElementById('createMapFile');
+            if (fi) fi.value = '';
+            const sn = document.getElementById('createMapSelectedName');
+            if (sn) { sn.textContent = 'Nenhum ficheiro seleccionado'; sn.classList.add('is-empty'); }
+            const pv = document.getElementById('createMapPreview');
+            if (pv) { pv.src = ''; pv.classList.add('d-none'); }
+        }
+
+        function limparSelecaoMapaEditar() {
+            editMapPendingFile = null;
+            libertarPreviewMapaEditUrl();
+            const fi = document.getElementById('editMapFile');
+            if (fi) fi.value = '';
+            const btn = document.getElementById('btnUploadMapImage');
+            if (btn) btn.disabled = true;
+            const sn = document.getElementById('editMapSelectedName');
+            if (sn) { sn.textContent = 'Nenhum ficheiro seleccionado'; sn.classList.add('is-empty'); }
         }
 
         function aoSeleccionarAvatarFicheiro(ficheiro) {
@@ -1101,6 +1199,7 @@
 
         let tenantsMap = {};
         let tenantsPasswordMap = {};
+        let usersPasswordMap = {};
 
         // carrega lista de tenants ao iniciar
         async function loadTenants(selectedId = null) {
@@ -1155,14 +1254,16 @@
 
                 // preenche lista de users
                 usersList.innerHTML = '';
+                usersPasswordMap = {};
                 if (data.users && data.users.length > 0) {
                     data.users.forEach(user => {
+                        usersPasswordMap[user.username] = user.password || '';
                         usersList.innerHTML += `
                             <li class="list-group-item py-2">
-                                <div><i class="fa-solid fa-user text-secondary me-2"></i> ${user}</div>
+                                <div><i class="fa-solid fa-user text-secondary me-2"></i> ${user.username}</div>
                                 <div>
-                                    <button class="btn btn-sm btn-outline-primary me-1" onclick="openEditUserModal('${user}')" title="Alterar Password"><i class="fa-solid fa-pen"></i></button>
-                                    <button class="btn btn-sm btn-outline-danger" onclick="deleteUser('${user}')" title="Apagar Utilizador"><i class="fa-solid fa-trash"></i></button>
+                                    <button class="btn btn-sm btn-outline-primary me-1" onclick="openEditUserModal('${user.username}')" title="Alterar Password"><i class="fa-solid fa-pen"></i></button>
+                                    <button class="btn btn-sm btn-outline-danger" onclick="deleteUser('${user.username}')" title="Apagar Utilizador"><i class="fa-solid fa-trash"></i></button>
                                 </div>
                             </li>`;
                     });
@@ -1216,27 +1317,66 @@
         });
 
         // Gestão de Mapas
+        document.getElementById('modalCreateMap').addEventListener('show.bs.modal', () => {
+            limparSelecaoMapaCriar();
+            definirEstadoMapaStatus('createMapStatus', '', '');
+        });
+
+        document.getElementById('createMapFile').addEventListener('change', (e) => {
+            const ficheiro = e.target.files[0];
+            if (!ficheiro) return;
+            const erro = validarFicheiroMapaLocal(ficheiro);
+            if (erro) {
+                limparSelecaoMapaCriar();
+                definirEstadoMapaStatus('createMapStatus', erro, 'error');
+                return;
+            }
+            createMapPendingFile = ficheiro;
+            libertarPreviewMapaCreateUrl();
+            createMapPreviewObjectUrl = URL.createObjectURL(ficheiro);
+            const sn = document.getElementById('createMapSelectedName');
+            sn.textContent = `${ficheiro.name} (${Math.round(ficheiro.size / 1024)} KB)`;
+            sn.classList.remove('is-empty');
+            const pv = document.getElementById('createMapPreview');
+            pv.src = createMapPreviewObjectUrl;
+            pv.classList.remove('d-none');
+            definirEstadoMapaStatus('createMapStatus', '', '');
+        });
+
         document.getElementById('formCreateMap').addEventListener('submit', async (e) => {
             e.preventDefault();
             const tenantId = tenantSelect.value;
             if (!tenantId) return showToast('Selecione um cliente primeiro.', 'error');
             try {
-                await apiFetch('/api/admin/mapas', {
+                const respMapa = await apiFetch('/api/admin/mapas', {
                     method: 'POST',
-                    body: JSON.stringify({
+                    body: {
                         tenant_id: tenantId,
                         nome: document.getElementById('newMapName').value.trim(),
                         limite_x: parseFloat(document.getElementById('newMapX').value),
                         limite_y: parseFloat(document.getElementById('newMapY').value),
-                        ficheiro_img: document.getElementById('newMapPath').value.trim() || null
-                    })
+                    }
                 });
+                if (createMapPendingFile) {
+                    definirEstadoMapaStatus('createMapStatus', 'A carregar imagem…', 'loading');
+                    const formData = new FormData();
+                    formData.append('file', createMapPendingFile, createMapPendingFile.name);
+                    const respImg = await fetch(`/api/admin/mapas/${respMapa.id}/imagem`, {
+                        method: 'POST',
+                        headers: { Authorization: `Bearer ${obterToken()}` },
+                        body: formData,
+                    });
+                    const dadosImg = await respImg.json().catch(() => ({}));
+                    if (!respImg.ok) throw new Error(extrairErroApi(dadosImg, respImg.status));
+                }
                 closeModal('modalCreateMap');
+                limparSelecaoMapaCriar();
                 e.target.reset();
                 showToast('Mapa adicionado com sucesso!');
                 loadTenantData(tenantId);
             } catch (error) {
                 showToast(error.message, 'error');
+                definirEstadoMapaStatus('createMapStatus', '', '');
             }
         });
 
@@ -1245,31 +1385,85 @@
             document.getElementById('editMapName').value = nome;
             document.getElementById('editMapX').value = x;
             document.getElementById('editMapY').value = y;
-            const pathInput = document.getElementById('editMapPath');
-            pathInput.value = path;
-            
-            updateMapPreview(path);
-
+            limparSelecaoMapaEditar();
+            definirEstadoMapaStatus('editMapStatus', '', '');
+            const preview = document.getElementById('editMapPreview');
+            if (path) {
+                preview.src = window.ASSET_PATHS ? window.ASSET_PATHS.normalizarCaminhoImagem(path) : path;
+                preview.classList.remove('d-none');
+            } else {
+                preview.classList.add('d-none');
+                preview.src = '';
+            }
             const modal = new bootstrap.Modal(document.getElementById('modalEditMap'));
             modal.show();
         };
 
-        function updateMapPreview(path) {
-            const preview = document.getElementById('editMapPreview');
-            if (path) {
-                const previewSrc = window.ASSET_PATHS
-                    ? window.ASSET_PATHS.normalizarCaminhoImagem(path)
-                    : path;
-                preview.src = previewSrc;
-                preview.classList.remove('d-none');
-            } else {
-                preview.classList.add('d-none');
-                preview.src = "";
+        document.getElementById('editMapFile').addEventListener('change', (e) => {
+            const ficheiro = e.target.files[0];
+            if (!ficheiro) return;
+            const erro = validarFicheiroMapaLocal(ficheiro);
+            if (erro) {
+                limparSelecaoMapaEditar();
+                definirEstadoMapaStatus('editMapStatus', erro, 'error');
+                return;
             }
-        }
+            editMapPendingFile = ficheiro;
+            document.getElementById('btnUploadMapImage').disabled = false;
+            libertarPreviewMapaEditUrl();
+            editMapPreviewObjectUrl = URL.createObjectURL(ficheiro);
+            const sn = document.getElementById('editMapSelectedName');
+            sn.textContent = `${ficheiro.name} (${Math.round(ficheiro.size / 1024)} KB)`;
+            sn.classList.remove('is-empty');
+            const preview = document.getElementById('editMapPreview');
+            preview.src = editMapPreviewObjectUrl;
+            preview.classList.remove('d-none');
+            definirEstadoMapaStatus('editMapStatus', 'Pré-visualização local — clique em «Carregar imagem» para guardar.', '');
+        });
 
-        document.getElementById('editMapPath').addEventListener('input', (e) => {
-            updateMapPreview(e.target.value.trim());
+        document.getElementById('btnUploadMapImage').addEventListener('click', async () => {
+            if (!editMapPendingFile) return;
+            const mapId = document.getElementById('editMapIdTarget').value;
+            definirEstadoMapaStatus('editMapStatus', 'A carregar imagem…', 'loading');
+            document.getElementById('btnUploadMapImage').disabled = true;
+            const formData = new FormData();
+            formData.append('file', editMapPendingFile, editMapPendingFile.name);
+            try {
+                const resp = await fetch(`/api/admin/mapas/${mapId}/imagem`, {
+                    method: 'POST',
+                    headers: { Authorization: `Bearer ${obterToken()}` },
+                    body: formData,
+                });
+                const dados = await resp.json().catch(() => ({}));
+                if (!resp.ok) throw new Error(extrairErroApi(dados, resp.status));
+                libertarPreviewMapaEditUrl();
+                const preview = document.getElementById('editMapPreview');
+                preview.src = dados.ficheiro_img + '?t=' + Date.now();
+                preview.classList.remove('d-none');
+                limparSelecaoMapaEditar();
+                definirEstadoMapaStatus('editMapStatus', 'Imagem guardada com sucesso.', 'success');
+                showToast('Imagem do mapa actualizada!');
+            } catch (error) {
+                definirEstadoMapaStatus('editMapStatus', error.message, 'error');
+                document.getElementById('btnUploadMapImage').disabled = !!editMapPendingFile;
+            }
+        });
+
+        document.getElementById('btnRemoverMapImage').addEventListener('click', async () => {
+            const mapId = document.getElementById('editMapIdTarget').value;
+            if (!mapId) return;
+            definirEstadoMapaStatus('editMapStatus', 'A remover imagem…', 'loading');
+            try {
+                await apiFetch(`/api/admin/mapas/${mapId}/imagem`, { method: 'DELETE' });
+                limparSelecaoMapaEditar();
+                const preview = document.getElementById('editMapPreview');
+                preview.classList.add('d-none');
+                preview.src = '';
+                definirEstadoMapaStatus('editMapStatus', 'Imagem removida.', 'success');
+                showToast('Imagem do mapa removida.');
+            } catch (error) {
+                definirEstadoMapaStatus('editMapStatus', error.message, 'error');
+            }
         });
 
         document.getElementById('formEditMap').addEventListener('submit', async (e) => {
@@ -1279,12 +1473,11 @@
             try {
                 await apiFetch(`/api/admin/mapas/${mapId}`, {
                     method: 'PUT',
-                    body: JSON.stringify({
+                    body: {
                         nome: document.getElementById('editMapName').value.trim(),
                         limite_x: parseFloat(document.getElementById('editMapX').value),
                         limite_y: parseFloat(document.getElementById('editMapY').value),
-                        ficheiro_img: document.getElementById('editMapPath').value.trim() || null
-                    })
+                    }
                 });
                 closeModal('modalEditMap');
                 showToast('Mapa atualizado com sucesso!');
@@ -1392,7 +1585,7 @@
             document.getElementById('editUsernameTarget').value = username;
             document.getElementById('editUsernameDisplay').textContent = username;
             document.getElementById('editUserNewName').value = username;
-            document.getElementById('editUserPassword').value = '';
+            document.getElementById('editUserPassword').value = usersPasswordMap[username] || '';
             const modal = new bootstrap.Modal(document.getElementById('modalEditUser'));
             modal.show();
         }

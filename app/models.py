@@ -10,7 +10,6 @@ class MapaCreate(BaseModel):
     nome: str
     limite_x: float
     limite_y: float
-    ficheiro_img: str | None = None
     tenant_id: str
 
 
@@ -18,7 +17,6 @@ class MapaUpdate(BaseModel):
     nome: str
     limite_x: float
     limite_y: float
-    ficheiro_img: str | None = None
 
 
 class TagAliasUpdate(BaseModel):
