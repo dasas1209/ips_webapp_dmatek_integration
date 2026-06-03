@@ -3,8 +3,6 @@ app/models.py
 pydantic models partilhados pela api metric4 rtls
 """
 
-from typing import List, Optional
-
 from pydantic import BaseModel
 
 
@@ -12,7 +10,7 @@ class MapaCreate(BaseModel):
     nome: str
     limite_x: float
     limite_y: float
-    ficheiro_img: Optional[str] = None
+    ficheiro_img: str | None = None
     tenant_id: str
 
 
@@ -20,7 +18,7 @@ class MapaUpdate(BaseModel):
     nome: str
     limite_x: float
     limite_y: float
-    ficheiro_img: Optional[str] = None
+    ficheiro_img: str | None = None
 
 
 class TagAliasUpdate(BaseModel):
@@ -29,17 +27,17 @@ class TagAliasUpdate(BaseModel):
 
 
 class TagAliasesUpdate(BaseModel):
-    tags: List[TagAliasUpdate]
+    tags: list[TagAliasUpdate]
 
 
 class TenantCreate(BaseModel):
     nome: str
-    password: Optional[str] = None
+    password: str | None = None
 
 
 class TenantUpdate(BaseModel):
     nome: str
-    password: Optional[str] = None
+    password: str | None = None
 
 
 class UserCreate(BaseModel):
@@ -49,8 +47,8 @@ class UserCreate(BaseModel):
 
 
 class UserUpdate(BaseModel):
-    new_username: Optional[str] = None
-    password: Optional[str] = None
+    new_username: str | None = None
+    password: str | None = None
 
 
 class TagCreate(BaseModel):
@@ -60,12 +58,12 @@ class TagCreate(BaseModel):
 
 
 class TenantProfileUpdate(BaseModel):
-    nome: Optional[str] = None
-    new_password: Optional[str] = None
+    nome: str | None = None
+    new_password: str | None = None
     current_password: str
 
 
 class SelfCredentialsUpdate(BaseModel):
-    new_username: Optional[str] = None
-    new_password: Optional[str] = None
+    new_username: str | None = None
+    new_password: str | None = None
     current_password: str

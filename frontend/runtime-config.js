@@ -1,9 +1,4 @@
-/**
- * runtime-config.js — configuracao injectada no browser para todos os modulos frontend
- *
- * valores podem ser substituidos antes deste script carregar, definindo window.RUNTIME_CONFIG
- * ex: <script>window.RUNTIME_CONFIG = { timing: { refreshPosicoesMs: 5000 } }</script>
- */
+// configuracao injectada no browser para todos os modulos frontend — substituir definindo window.RUNTIME_CONFIG
 (function () {
     const globalConfig = window.RUNTIME_CONFIG || {};
 

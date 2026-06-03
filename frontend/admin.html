@@ -5,9 +5,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Administração — Metric4 RTLS</title>
-    <!-- Bootstrap 5 CSS -->
+    <!-- bootstrap 5 css -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
-    <!-- FontAwesome for icons -->
+    <!-- fontawesome para icones -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
     <link rel="stylesheet" href="/static/style.css?v=3.2">
     <style>
@@ -172,7 +172,7 @@
 
 <body>
 
-    <!-- Navbar -->
+    <!-- navbar -->
     <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
         <div class="container">
             <a class="navbar-brand" href="#">
@@ -188,7 +188,7 @@
         </div>
     </nav>
 
-    <!-- Main Content -->
+    <!-- conteudo principal -->
     <div class="container mt-4">
         <div class="row mb-4 d-none" id="tenantSelectorSection">
             <div class="col-md-8 offset-md-2">
@@ -225,9 +225,9 @@
 
         <div id="configSection" class="d-none">
             <div class="row">
-                <!-- Mapa & Users Config -->
+                <!-- mapa e utilizadores -->
                 <div class="col-lg-5">
-                    <!-- Mapa -->
+                    <!-- mapa -->
                     <div class="card mb-4" id="mapaCard">
                         <div class="card-header d-flex justify-content-between align-items-center">
                             <span><i class="fa-solid fa-map me-1"></i> Gestão de Mapas</span>
@@ -235,12 +235,12 @@
                         </div>
                         <div class="card-body p-0">
                             <ul class="list-group list-group-flush" id="mapsList">
-                                <!-- Maps will be loaded here -->
+                                <!-- mapas carregados via js -->
                             </ul>
                         </div>
                     </div>
 
-                    <!-- Utilizadores -->
+                    <!-- utilizadores -->
                     <div class="card">
                         <div class="card-header d-flex justify-content-between align-items-center">
                             <span><i class="fa-solid fa-users me-1"></i> Utilizadores</span>
@@ -249,13 +249,13 @@
                         </div>
                         <div class="card-body p-0">
                             <ul class="list-group list-group-flush" id="usersList">
-                                <!-- Users will be loaded here -->
+                                <!-- utilizadores carregados via js -->
                             </ul>
                         </div>
                     </div>
                 </div>
 
-                <!-- Tags Config -->
+                <!-- tags -->
                 <div class="col-lg-7 mt-4 mt-lg-0" id="tagsConfigCol">
                     <div class="card h-100">
                         <div class="card-header d-flex justify-content-between align-items-center">
@@ -281,7 +281,7 @@
                                         </tr>
                                     </thead>
                                     <tbody id="tagsTableBody">
-                                        <!-- Tags will be loaded here -->
+                                        <!-- tags carregadas via js -->
                                     </tbody>
                                 </table>
                             </div>
@@ -369,9 +369,9 @@
         </div>
     </div>
 
-    <!-- MODALS -->
+    <!-- modais -->
 
-    <!-- Modal Create Tenant -->
+    <!-- modal criar cliente -->
     <div class="modal fade" id="modalCreateTenant" tabindex="-1">
         <div class="modal-dialog">
             <div class="modal-content">
@@ -402,7 +402,7 @@
         </div>
     </div>
 
-    <!-- Modal Create Map -->
+    <!-- modal criar mapa -->
     <div class="modal fade" id="modalCreateMap" tabindex="-1">
         <div class="modal-dialog">
             <div class="modal-content">
@@ -440,7 +440,7 @@
         </div>
     </div>
 
-    <!-- Modal Edit Map -->
+    <!-- modal editar mapa -->
     <div class="modal fade" id="modalEditMap" tabindex="-1">
         <div class="modal-dialog">
             <div class="modal-content">
@@ -482,7 +482,7 @@
         </div>
     </div>
 
-    <!-- Modal Edit Tenant -->
+    <!-- modal editar cliente -->
     <div class="modal fade" id="modalEditTenant" tabindex="-1">
         <div class="modal-dialog">
             <div class="modal-content">
@@ -510,7 +510,7 @@
         </div>
     </div>
 
-    <!-- Modal Delete Tenant (CASCADE DELETE WARNING) -->
+    <!-- modal apagar cliente (elimina em cascata) -->
     <div class="modal fade" id="modalDeleteTenant" tabindex="-1">
         <div class="modal-dialog">
             <div class="modal-content">
@@ -541,7 +541,7 @@
         </div>
     </div>
 
-    <!-- Modal Create User -->
+    <!-- modal criar utilizador -->
     <div class="modal fade" id="modalCreateUser" tabindex="-1">
         <div class="modal-dialog">
             <div class="modal-content">
@@ -569,7 +569,7 @@
         </div>
     </div>
 
-    <!-- Modal Edit User -->
+    <!-- modal editar utilizador -->
     <div class="modal fade" id="modalEditUser" tabindex="-1">
         <div class="modal-dialog">
             <div class="modal-content">
@@ -598,7 +598,7 @@
         </div>
     </div>
 
-    <!-- Modal Create Tag -->
+    <!-- modal criar tag -->
     <div class="modal fade" id="modalCreateTag" tabindex="-1">
         <div class="modal-dialog">
             <div class="modal-content">
@@ -626,7 +626,7 @@
         </div>
     </div>
 
-    <!-- Modal Conta da Empresa (role admin) -->
+    <!-- modal conta da empresa -->
     <div class="modal fade" id="modalTenantSettings" tabindex="-1" aria-labelledby="modalTenantSettingsLabel">
         <div class="modal-dialog modal-dialog-centered modal-lg">
             <div class="modal-content">
@@ -695,10 +695,10 @@
         </div>
     </div>
 
-    <!-- Toast Notification Container -->
+    <!-- contentor de toasts -->
     <div class="toast-container"></div>
 
-    <!-- Auth System -->
+    <!-- autenticacao -->
     <script src="/static/asset-paths.js?v=3.2"></script>
     <script src="/static/auth.js?v=3"></script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>

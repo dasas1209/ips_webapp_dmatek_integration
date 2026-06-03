@@ -176,12 +176,12 @@ def obter_dados_auditoria(
     if dt_inicio < agora_utc - timedelta(days=LIMITE_DIAS_HISTORICO):
         raise HTTPException(status_code=422, detail=f"inicio nao pode ser anterior a {LIMITE_DIAS_HISTORICO} dias atras.")
 
-    inicio_safe = dt_inicio.isoformat()
-    fim_safe    = dt_fim.isoformat()
+    inicio_iso = dt_inicio.isoformat()
+    fim_iso    = dt_fim.isoformat()
 
     query_trajetoria = f"""
         from(bucket: "{INFLUX_BUCKET}")
-        |> range(start: {inicio_safe}, stop: {fim_safe})
+        |> range(start: {inicio_iso}, stop: {fim_iso})
         |> filter(fn: (r) => r["_measurement"] == "posicao_tag")
         |> filter(fn: (r) => r["tenant_id"] == "{tenant_id}")
         |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
@@ -190,7 +190,7 @@ def obter_dados_auditoria(
     """
     query_eventos_auditoria = f"""
         from(bucket: "{INFLUX_BUCKET}")
-        |> range(start: {inicio_safe}, stop: {fim_safe})
+        |> range(start: {inicio_iso}, stop: {fim_iso})
         |> filter(fn: (r) => r["_measurement"] == "evento_auditoria")
         |> filter(fn: (r) => r["tenant_id"] == "{tenant_id}")
         |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
@@ -199,9 +199,9 @@ def obter_dados_auditoria(
 
     try:
         limite_x, limite_y = obter_limites_mapa(tenant_id)
-        qa = get_influx_client().query_api()
-        resultado         = qa.query(org=INFLUX_ORG, query=query_trajetoria)
-        resultado_eventos = qa.query(org=INFLUX_ORG, query=query_eventos_auditoria)
+        query_api = get_influx_client().query_api()
+        resultado         = query_api.query(org=INFLUX_ORG, query=query_trajetoria)
+        resultado_eventos = query_api.query(org=INFLUX_ORG, query=query_eventos_auditoria)
 
         esparguete_pontos: list[dict] = []
         registos: list[RegistoTag] = []

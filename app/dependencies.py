@@ -11,6 +11,7 @@ from threading import Lock
 from fastapi import Depends, HTTPException
 from fastapi.security import OAuth2PasswordBearer
 from influxdb_client import Point  # type: ignore
+from influxdb_client.client.write_api import SYNCHRONOUS  # type: ignore
 from jose import JWTError, jwt  # type: ignore
 
 from config import (
@@ -25,9 +26,7 @@ from app.services.influx_client import get_influx_client
 
 logger = logging.getLogger("metric4.api")
 
-# ---------------------------------------------------------------------------
 # rate limiting
-# ---------------------------------------------------------------------------
 
 class TenantRateLimiter:
     """throttling em memoria por chave para reduzir risco de noisy neighbor e brute force"""
@@ -52,9 +51,7 @@ class TenantRateLimiter:
 tenant_rate_limiter = TenantRateLimiter(max_requests=120, window_seconds=60)
 login_rate_limiter = TenantRateLimiter(max_requests=10, window_seconds=60)
 
-# ---------------------------------------------------------------------------
 # jwt
-# ---------------------------------------------------------------------------
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 
@@ -78,9 +75,7 @@ def obter_payload_token(token: str = Depends(oauth2_scheme)) -> dict:
 def verificar_token(payload: dict = Depends(obter_payload_token)) -> str:
     return payload["tenant_id"]
 
-# ---------------------------------------------------------------------------
 # roles
-# ---------------------------------------------------------------------------
 
 def require_admin(payload: dict = Depends(obter_payload_token)) -> str:
     if payload.get("role") != "superadmin":
@@ -102,22 +97,18 @@ def _verificar_acesso_tenant(tenant_alvo: str, payload: dict) -> None:
         return
     raise HTTPException(status_code=403, detail="Acesso negado: sem permissao para este tenant.")
 
-# ---------------------------------------------------------------------------
 # rate limit dependency
-# ---------------------------------------------------------------------------
 
 def aplicar_rate_limit(tenant_id: str = Depends(verificar_token)) -> str:
     if not tenant_rate_limiter.allow(tenant_id):
-        logger.warning("Rate limit excedido para tenant_id=%s", tenant_id)
+        logger.warning("rate limit excedido para tenant_id=%s", tenant_id)
         raise HTTPException(
             status_code=429,
             detail="Limite de pedidos por minuto excedido para este tenant.",
         )
     return tenant_id
 
-# ---------------------------------------------------------------------------
 # auditoria
-# ---------------------------------------------------------------------------
 
 def log_audit_event(user_id: str, tenant_id: str, action: str, details: str = "") -> None:
     try:
@@ -128,10 +119,10 @@ def log_audit_event(user_id: str, tenant_id: str, action: str, details: str = ""
             .field("action", action)
             .field("details", details)
         )
-        get_influx_client().write_api().write(
+        get_influx_client().write_api(write_options=SYNCHRONOUS).write(
             bucket=INFLUX_BUCKET,
             org=INFLUX_ORG,
             record=point,
         )
-    except Exception as exc:
-        print(f"Falha ao gravar evento de auditoria no InfluxDB: {exc}")
+    except Exception:
+        logger.exception("falha ao gravar evento de auditoria no influxdb")

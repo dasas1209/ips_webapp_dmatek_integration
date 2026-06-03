@@ -1,7 +1,5 @@
 let dadosAuditoria = null;
 let imagemMapaAuditoria = new Image();
-let imagemLogoMetric4 = new Image();
-let logoCarregado = false;
 let presetAtivo = "4h";
 const cfg = window.RUNTIME_CONFIG || {};
 
@@ -27,39 +25,11 @@ function formatarData(dt) {
     return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
-function carregarLogo() {
-    return new Promise((resolve) => {
-        if (logoCarregado) {
-            resolve(true);
-            return;
-        }
-        imagemLogoMetric4.onload = () => {
-            logoCarregado = true;
-            resolve(true);
-        };
-        imagemLogoMetric4.onerror = () => resolve(false);
-        imagemLogoMetric4.src = (window.ASSET_PATHS && window.ASSET_PATHS.LOGO) || "/static/assets/imgs/metric-logo.svg";
-    });
-}
-
-// renderiza o logotipo metric4 numa pagina do pdf
-function _adicionarLogoAoPdf(pdf, x, y, w, h) {
-    if (!logoCarregado) return;
-    const c = document.createElement("canvas");
-    c.width = 400;
-    c.height = 150;
-    const ctx = c.getContext("2d");
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, c.width, c.height);
-    ctx.drawImage(imagemLogoMetric4, 40, 45, 320, 60);
-    pdf.addImage(c.toDataURL("image/png"), "PNG", x, y, w, h);
-}
-
 window.onload = function () {
     redirecionarSeNaoAutenticado();
     const tenant = obterTenantId();
     if (tenant) document.getElementById("badge-cliente").textContent = tenant;
-    carregarLogo();
+    PDF_UTILS.carregarLogo();
     aplicarPreset("4h");
 };
 
@@ -260,7 +230,7 @@ function renderizarTabelaKpis(kpis) {
         return;
     }
 
-    // constroi todas as linhas de uma vez para evitar n reflows do dom
+    // uma passagem unica para evitar n reflows do dom
     const linhas = kpis.map((k) => {
         const cor = k.bateria_min_perc <= 5 ? "red" : k.bateria_min_perc <= 20 ? "#fd7e14" : "#28a745";
         const alertaBadge = k.num_alertas > 0
@@ -287,7 +257,7 @@ function renderizarIncidentes(incidentes) {
         return;
     }
 
-    // constroi todos os itens de uma vez para evitar n reflows do dom
+    // uma passagem unica para evitar n reflows do dom
     const itens = incidentes.map((inc) => {
         const ts   = formatarData(inc.timestamp);
         const desc = inc.descricao
@@ -309,7 +279,7 @@ function renderizarIncidentes(incidentes) {
 async function exportarPNG() {
     if (!dadosAuditoria) return;
 
-    await carregarLogo();
+    await PDF_UTILS.carregarLogo();
 
     const canvasSrc = document.getElementById("canvasEsparguetePreview");
     const exportCanvas = document.createElement("canvas");
@@ -319,11 +289,11 @@ async function exportarPNG() {
 
     ctx.drawImage(canvasSrc, 0, 0);
 
-    if (logoCarregado) {
+    if (PDF_UTILS.logoDisponivel()) {
         ctx.globalAlpha = 0.96;
         ctx.fillStyle = "rgba(255,255,255,0.9)";
         ctx.fillRect(10, 10, 180, 48);
-        ctx.drawImage(imagemLogoMetric4, 16, 16, 150, 30);
+        PDF_UTILS.desenharLogoNoCanvas(ctx, 16, 16, 150, 30);
         ctx.globalAlpha = 1;
     }
 
@@ -361,7 +331,7 @@ async function exportarPDF() {
         return;
     }
 
-    await carregarLogo();
+    await PDF_UTILS.carregarLogo();
     setEstadoCarregando(true, "A gerar PDF...");
 
     const { jsPDF } = window.jspdf;
@@ -376,7 +346,7 @@ async function exportarPDF() {
         pdf.setFillColor(26, 31, 54);
         pdf.rect(0, 0, W, H, "F");
 
-        _adicionarLogoAoPdf(pdf, W / 2 - 35, 12, 70, 18);
+        PDF_UTILS.inserirLogo(pdf, W / 2 - 35, 12, 70, 18);
 
         pdf.setFillColor(255, 255, 255);
         pdf.roundedRect(20, 40, W - 40, 60, 6, 6, "F");
@@ -429,7 +399,7 @@ async function exportarPDF() {
         pdf.setFillColor(244, 246, 251);
         pdf.rect(0, 0, Wl, Hl, "F");
 
-        _adicionarLogoAoPdf(pdf, 10, 6, 48, 12);
+        PDF_UTILS.inserirLogo(pdf, 10, 6, 48, 12);
 
         pdf.setTextColor(26, 31, 54);
         pdf.setFontSize(14);
@@ -477,7 +447,7 @@ async function exportarPDF() {
         pdf.setFillColor(244, 246, 251);
         pdf.rect(0, 0, W, H, "F");
 
-        _adicionarLogoAoPdf(pdf, 10, 6, 42, 10);
+        PDF_UTILS.inserirLogo(pdf, 10, 6, 42, 10);
 
         pdf.setTextColor(26, 31, 54);
         pdf.setFontSize(14);
@@ -532,7 +502,7 @@ async function exportarPDF() {
         pdf.setFillColor(244, 246, 251);
         pdf.rect(0, 0, W, H, "F");
 
-        _adicionarLogoAoPdf(pdf, 10, 6, 42, 10);
+        PDF_UTILS.inserirLogo(pdf, 10, 6, 42, 10);
 
         pdf.setTextColor(26, 31, 54);
         pdf.setFontSize(14);
@@ -642,15 +612,8 @@ async function exportarPDF() {
             });
         }
 
-        const totalPag = pdf.internal.getNumberOfPages();
-        const dimPag = (p) => (p === 2 ? [297, 210] : [210, 297]);
-        for (let p = 1; p <= totalPag; p += 1) {
-            pdf.setPage(p);
-            pdf.setFontSize(7);
-            pdf.setTextColor(150, 160, 180);
-            const [Wp, Hp] = dimPag(p);
-            pdf.text(`Metric4 RTLS - Auditoria Industrial | Pág. ${p}/${totalPag}`, Wp / 2, Hp - 5, { align: "center" });
-        }
+        // pagina 2 e landscape — dimPag ajusta o rodape para cada orientacao
+        PDF_UTILS.adicionarRodape(pdf, "Metric4 RTLS - Auditoria Industrial", (p) => p === 2 ? [297, 210] : [210, 297]);
 
         pdf.save(`auditoria_${tenant}_${iv.inicio.slice(0, 10)}.pdf`);
     } catch (e) {
@@ -660,4 +623,3 @@ async function exportarPDF() {
         setEstadoCarregando(false);
     }
 }
-

@@ -1,1 +1,1 @@
-# app/routes — routers fastapi por dominio
+# routers fastapi por dominio

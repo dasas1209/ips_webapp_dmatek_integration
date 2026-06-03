@@ -76,7 +76,7 @@ h1,h2,h3,p { margin: 0; }
     font-size: 12px;
 }
 
-/* Login */
+/* login */
 .login-screen {
     min-height: 100vh;
     display: grid;
@@ -132,7 +132,7 @@ h1,h2,h3,p { margin: 0; }
     font-size: 13px;
 }
 
-/* Dashboard */
+/* dashboard */
 .app-shell {
     min-height: 100vh;
     display: grid;
@@ -479,7 +479,7 @@ tr.selected-row { background: #eff6ff; }
     text-align: center;
 }
 
-/* Relatórios e auditoria */
+/* relatorios e auditoria */
 .page-shell {
     max-width: 1360px;
     margin: 0 auto;

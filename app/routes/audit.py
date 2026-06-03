@@ -5,7 +5,6 @@ rotas do log de auditoria: /admin/audit-log, /api/admin/*/sessions
 
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -37,7 +36,7 @@ def _flux_time_literal(dt: datetime) -> str:
     return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _resolver_intervalo_audit(ts_inicio: Optional[str], ts_fim: Optional[str]) -> tuple[str, str]:
+def _resolver_intervalo_audit(ts_inicio: str | None, ts_fim: str | None) -> tuple[str, str]:
     if not ts_inicio and not ts_fim:
         return "-100y", "now()"
     if ts_inicio and ts_fim:
@@ -49,13 +48,13 @@ def _resolver_intervalo_audit(ts_inicio: Optional[str], ts_fim: Optional[str]) -
     return _flux_time_literal(inicio), _flux_time_literal(fim)
 
 
-def _match_parcial_ci(valor: Optional[str], filtro: Optional[str]) -> bool:
+def _match_parcial_ci(valor: str | None, filtro: str | None) -> bool:
     if not filtro:
         return True
     return filtro.lower() in (valor or "").lower()
 
 
-def _carregar_system_access_log(start: str, stop: str, tenant_id: Optional[str] = None) -> list[dict]:
+def _carregar_system_access_log(start: str, stop: str, tenant_id: str | None = None) -> list[dict]:
     if not INFLUX_BUCKET or not INFLUX_ORG:
         return []
 
@@ -91,12 +90,12 @@ def _carregar_system_access_log(start: str, stop: str, tenant_id: Optional[str] 
 
 @router.get("/admin/audit-log", tags=["Admin"])
 def admin_audit_log(
-    tenant_id: Optional[str] = Query(None),
-    username: Optional[str] = Query(None),
-    acao: Optional[str] = Query(None),
-    detalhes: Optional[str] = Query(None),
-    ts_inicio: Optional[str] = Query(None),
-    ts_fim: Optional[str] = Query(None),
+    tenant_id: str | None = Query(None),
+    username: str | None = Query(None),
+    acao: str | None = Query(None),
+    detalhes: str | None = Query(None),
+    ts_inicio: str | None = Query(None),
+    ts_fim: str | None = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=2000),
     _: dict = Depends(require_superadmin),
@@ -129,7 +128,7 @@ def admin_audit_log(
     except HTTPException:
         raise
     except Exception as exc:
-        logger.exception("Falha ao consultar audit-log: %s", exc)
+        logger.exception("falha ao consultar audit-log: %s", exc)
         return {"total": 0, "page": page, "page_size": page_size, "resultados": []}
 
 
@@ -138,7 +137,7 @@ def admin_get_tenant_sessions(
     tenant_id: str,
     start: str = Query("-30d"),
     stop: str = Query("now()"),
-    action: Optional[str] = Query(None),
+    action: str | None = Query(None),
     payload: dict = Depends(obter_payload_token),
 ):
     _verificar_acesso_tenant(tenant_id, payload)

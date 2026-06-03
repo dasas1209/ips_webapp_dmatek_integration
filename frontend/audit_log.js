@@ -1,9 +1,7 @@
-/**
- * audit_log.js — log global de ações (superadmin)
- */
+// audit_log.js — log global de acoes (superadmin)
 
 const ACOES_LABEL = {
-    // sessão
+    // sessao
     login: "Início de sessão",
     logout: "Fim de sessão",
     credentials_updated: "Credenciais alteradas",
@@ -27,7 +25,7 @@ const ACOES_LABEL = {
     tag_created: "Tag criada",
     tag_deleted: "Tag eliminada",
     tag_aliases_updated: "Nomes de tags atualizados",
-    // dados e relatórios
+    // dados e relatorios
     audit_report_viewed: "Relatório de auditoria consultado",
 };
 
@@ -235,7 +233,7 @@ async function carregarTenants() {
             });
         els.filtroTenant.innerHTML = opts.join("");
     } catch {
-        /* mantém opção «todos» */
+        /* mantem opcao todos */
     }
 }
 
@@ -345,7 +343,7 @@ function configurarEventos() {
     });
 
     els.filtroTenant.addEventListener("change", () => {
-        /* aplicação imediata ao escolher cliente — padrão comum em selects */
+        /* aplicacao imediata ao escolher cliente */
         aplicarFiltros();
     });
 
@@ -384,32 +382,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     carregarAuditLog();
 });
 
-// ─── PDF Export ───────────────────────────────────────────────────────────────
-
-let _pdfLogoImg = null;
-let _pdfLogoOk = false;
-
-function _carregarLogoParaPdf() {
-    return new Promise((resolve) => {
-        if (_pdfLogoOk) { resolve(true); return; }
-        _pdfLogoImg = new Image();
-        _pdfLogoImg.onload = () => { _pdfLogoOk = true; resolve(true); };
-        _pdfLogoImg.onerror = () => resolve(false);
-        _pdfLogoImg.src = (window.ASSET_PATHS && window.ASSET_PATHS.LOGO) || "/static/assets/imgs/metric-logo.svg";
-    });
-}
-
-function _logoNaPagina(pdf, x, y, w, h) {
-    if (!_pdfLogoOk || !_pdfLogoImg) return;
-    const c = document.createElement("canvas");
-    c.width = 400; c.height = 150;
-    const ctx = c.getContext("2d");
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, c.width, c.height);
-    ctx.drawImage(_pdfLogoImg, 40, 45, 320, 60);
-    pdf.addImage(c.toDataURL("image/png"), "PNG", x, y, w, h);
-}
-
 function _resumoFiltros() {
     const periodoLabels = { "24h": "Últimas 24 horas", "7d": "Últimos 7 dias", "30d": "Últimos 30 dias" };
     const { tsInicio, tsFim } = obterFiltrosTemporais();
@@ -445,7 +417,7 @@ async function exportarAuditLogPDF() {
     btn.textContent = "A gerar PDF…";
 
     try {
-        await _carregarLogoParaPdf();
+        await PDF_UTILS.carregarLogo();
 
         const params = construirQueryParams();
         params.set("page", "1");
@@ -470,11 +442,10 @@ async function exportarAuditLogPDF() {
         const W = 210, H = 297;
         const pdf = new jsPDF("p", "mm", "a4");
 
-        // ── Capa (navy) ──────────────────────────────────────────────
         pdf.setFillColor(26, 31, 54);
         pdf.rect(0, 0, W, H, "F");
 
-        _logoNaPagina(pdf, W / 2 - 35, 12, 70, 18);
+        PDF_UTILS.inserirLogo(pdf, W / 2 - 35, 12, 70, 18);
 
         pdf.setFillColor(255, 255, 255);
         pdf.roundedRect(20, 40, W - 40, 62, 6, 6, "F");
@@ -516,7 +487,6 @@ async function exportarAuditLogPDF() {
         pdf.setFontSize(8);
         pdf.text("Metric4 RTLS — Documento de Auditoria Confidencial", W / 2, H - 10, { align: "center" });
 
-        // ── Páginas de conteúdo ──────────────────────────────────────
         const cabecalhos = ["Timestamp", "Tenant", "Utilizador", "Ação", "Detalhes"];
         const larguras   = [38, 28, 28, 38, 58];
         const xTbl = 10;
@@ -539,7 +509,7 @@ async function exportarAuditLogPDF() {
             pdf.addPage("a4", "p");
             pdf.setFillColor(244, 246, 251);
             pdf.rect(0, 0, W, H, "F");
-            _logoNaPagina(pdf, 10, 6, 42, 10);
+            PDF_UTILS.inserirLogo(pdf, 10, 6, 42, 10);
             pdf.setTextColor(26, 31, 54);
             pdf.setFontSize(13);
             pdf.setFont("helvetica", "bold");
@@ -561,7 +531,7 @@ async function exportarAuditLogPDF() {
         } else {
             eventos.forEach((ev, idx) => {
                 pdf.setFontSize(7);
-                const detLines  = pdf.splitTextToSize(ev.detalhes  || "—",                  larguras[4] - 2);
+                const detLines  = pdf.splitTextToSize(ev.detalhes  || "—",                   larguras[4] - 2);
                 const acaoLines = pdf.splitTextToSize(ACOES_LABEL[ev.acao] || ev.acao || "—", larguras[3] - 2);
                 const tenLines  = pdf.splitTextToSize(labelTenant(ev.tenant_id),              larguras[1] - 2);
                 const maxLinhas = Math.max(detLines.length, acaoLines.length, tenLines.length);
@@ -578,29 +548,24 @@ async function exportarAuditLogPDF() {
                 pdf.setFont("helvetica", "normal");
                 pdf.setTextColor(40, 50, 70);
 
-                // Timestamp (single line)
                 pdf.setFontSize(7.5);
                 pdf.text(formatarTimestamp(ev.timestamp), xL, y + 4.5);
                 xL += larguras[0];
 
-                // Tenant (multiline)
                 let yM = y + 3.6;
                 pdf.setFontSize(7);
                 tenLines.forEach((l) => { pdf.text(l, xL, yM); yM += passoLinha; });
                 xL += larguras[1];
 
-                // Username (single line)
                 pdf.setFontSize(7.5);
                 pdf.text(ev.username || "—", xL, y + 4.5);
                 xL += larguras[2];
 
-                // Ação (multiline)
                 yM = y + 3.6;
                 pdf.setFontSize(7);
                 acaoLines.forEach((l) => { pdf.text(l, xL, yM); yM += passoLinha; });
                 xL += larguras[3];
 
-                // Detalhes (multiline, muted color)
                 yM = y + 3.6;
                 pdf.setTextColor(55, 65, 90);
                 detLines.forEach((l) => { pdf.text(l, xL, yM); yM += passoLinha; });
@@ -609,14 +574,7 @@ async function exportarAuditLogPDF() {
             });
         }
 
-        // Rodapé em todas as páginas
-        const totalPag = pdf.internal.getNumberOfPages();
-        for (let p = 1; p <= totalPag; p++) {
-            pdf.setPage(p);
-            pdf.setFontSize(7);
-            pdf.setTextColor(150, 160, 180);
-            pdf.text(`Metric4 RTLS — Log de Ações | Pág. ${p}/${totalPag}`, W / 2, H - 5, { align: "center" });
-        }
+        PDF_UTILS.adicionarRodape(pdf, "Metric4 RTLS — Log de Ações", () => [W, H]);
 
         const dataStr = new Date().toISOString().slice(0, 10);
         pdf.save(`audit_log_metric4_${dataStr}.pdf`);

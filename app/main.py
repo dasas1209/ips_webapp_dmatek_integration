@@ -36,7 +36,6 @@ app.add_middleware(
 
 app.mount("/static", StaticFiles(directory="frontend"), name="static")
 
-# routers
 app.include_router(auth.router)
 app.include_router(realtime.router)
 app.include_router(kpis.router)
@@ -59,8 +58,6 @@ async def _startup() -> None:
 def api_health():
     return {"ok": True, "build": API_BUILD_ID, "tenant_profile_api": True}
 
-
-# serving de paginas html
 
 @app.get("/", include_in_schema=False)
 @app.get("/app", include_in_schema=False)
